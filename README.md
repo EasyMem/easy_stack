@@ -1,7 +1,7 @@
 <table>
   <tr>
     <td width="150" valign="middle">
-      <img src=".github/assets/logo.jpeg" width="150" alt="easy_stack logo" />
+      <img src=".github/assets/logo.jpg" width="150" alt="easy_stack logo" />
     </td>
     <td valign="middle">
       <div id="user-content-toc">
@@ -50,6 +50,30 @@
 *   **Concurrecy Model:** Intentionally lock-free and single-threaded to avoid mutex overhead. Designed for **Thread-Local Storage (TLS)** patterns (one `EStack` instance per thread).
 *   **Embedded and Bare-Metal Ready:** Zero dependencies on standard `libc` heap managers. Can compile on bare-metal architectures with zero feature degradation (`ESTACK_NO_MALLOC`).
 *   **Full C++ Compatibility:** Wrapped in `extern "C"` for seamless integration into both C and C++ codebases.
+
+---
+
+## Part of the EasyMem Ecosystem
+
+While **EasyStack** is a powerful standalone allocator, it was originally designed and battle-tested as a core modular component of the `easy_memory` project — a full-fledged, general-purpose memory management system.
+
+If your project requires **only** a fast LIFO stack, this library is the perfect, laser-focused tool.
+
+If you need a complete memory toolbox to manage complex object lifecycles, eliminate heap fragmentation, or use advanced arenas, consider the full `easy_memory` library.
+
+| Feature                          | `easy_stack` (This Library) | `easy_memory` (Full System) |
+| :------------------------------: | :-------------------------: | :-------------------------: |
+| **LIFO Stack Allocator**         |              [x]            |              [x]            |
+| **Zero External Dependencies**   |              [x]            |              [x]            |
+| **Single-Header (STB-style)**    |              [x]            |              [x]            |
+| Ultra-Compact Header (16 bytes)  |              [x]            |              [ ]            |
+| General Purpose Heap Allocator   |              [ ]            |              [x]            |
+| Nested Scopes (Hierarchical)     |              [ ]            |              [x]            |
+| Slab & Bump Allocators           |              [ ]            |              [x]            |
+| LLRB-Tree Defragmentation Engine |              [ ]            |              [x]            |
+| Scoped Scratchpad Reservations   |              [ ]            |              [x]            |
+
+**[Check out the full `easy_memory` library here.](https://github.com/EasyMem/easy_memory)**
 
 ---
 

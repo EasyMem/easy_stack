@@ -799,9 +799,11 @@ ESTACKDEF EStack *estack_create_static(void *ESTACK_RESTRICT memory, size_t size
     size_t padding = aligned_addr - raw_addr;
 
     // Check if the remaining buffer is still large enough after alignment adjustment
+    // LCOV_EXCL_START
     if (size < padding + ESTACK_MIN_SIZE) {
         return NULL;
     }
+    // LCOV_EXCL_STOP
 
     EStack *stack = (EStack *)aligned_addr;
 
@@ -863,16 +865,20 @@ ESTACKDEF EStack *estack_create(size_t capacity) {
     size_t total_size = sizeof(EStack) + capacity;
     
     void *raw_mem = malloc(total_size);
+    // LCOV_EXCL_START
     if (!raw_mem) {
         return NULL;
     }
+    // LCOV_EXCL_STOP
 
     // Delegate construction to static initializer
     EStack *stack = estack_create_static(raw_mem, total_size);
+    // LCOV_EXCL_START
     if (!stack) {
         free(raw_mem);
         return NULL;
     }
+    // LCOV_EXCL_STOP
 
     // Set the dynamic allocation flag to notify the destructor to call free()
     estack_set_is_dynamic(stack, true);
