@@ -73,17 +73,17 @@ Traditional stack allocators suffix or prefix each payload with inline metadata 
 `easy_stack` solves this by introducing an **Inverted Bi-Directional Buffer Layout**:
 
 ```text
-=================================================================================================
+===============================================================================================
  INVERTED BI-DIRECTIONAL BUFFER LAYOUT
-=================================================================================================
+===============================================================================================
 
-  Low Address                                                               High Address
- [ EStack Header ] [ Metadata Offset Array (Grows Forward) ──>]      [<── Payloads (Backward) ]
- ┌───────────────┐ ┌────────────┬────────────┬────────────┐          ┌────────────┬────────────┐
- │ capacity_meta │ │  Offset 0  │  Offset 1  │  Offset 2  │   ...    │  Payload 1 │  Payload 0 │
- │  meta_index   │ │ (uint16_t) │ (uint16_t) │ (uint16_t) │          │ (Aligned)  │ (Aligned)  │
- └───────────────┘ └────────────┴────────────┴────────────┘          └────────────┴────────────┘
-                   └──────────── L1 Cache Line (Dense) ───┘          └─ aligned_ptr           
+  Low Address                                                             High Address
+ [ EStack Header ] [ Metadata Offset Array (Grows Forward) ──>]    [<── Payloads (Backward) ]
+ ┌───────────────┐ ┌────────────┬────────────┬────────────┐        ┌────────────┬────────────┐
+ │ capacity_meta │ │  Offset 0  │  Offset 1  │  Offset 2  │   ...  │  Payload 1 │  Payload 0 │
+ │  meta_index   │ │ (uint16_t) │ (uint16_t) │ (uint16_t) │        │ (Aligned)  │ (Aligned)  │
+ └───────────────┘ └────────────┴────────────┴────────────┘        └────────────┴────────────┘
+                   └──────────── L1 Cache Line (Dense) ───┘        └─ aligned_ptr           
 ```
 
 ### The Physics of the Layout
