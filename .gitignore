@@ -63,3 +63,8 @@ fuzzers/*_fuzzer
 *.gcno
 *.gcda
 *.info
+
+# Python
+.venv
+
+benchmark
