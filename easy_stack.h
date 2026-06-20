@@ -3,7 +3,31 @@
 
 /*
  * Easy Stack Allocator (easy_stack.h)
- * A lightweight, platform-agnostic, and safe LIFO stack allocator for C.
+ * A stupidly fast, lightweight, platform-agnostic, and safe LIFO stack allocator for C.
+ * 
+ * ============================================================================
+ *  LICENSE: MIT
+ * ============================================================================
+ *  Copyright (c) 2026 gooderfreed
+ *
+ *  Permission is hereby granted, free of charge, to any person obtaining a copy
+ *  of this software and associated documentation files (the "Software"), to deal
+ *  in the Software without restriction, including without limitation the rights
+ *  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ *  copies of the Software, and to permit persons to whom the Software is
+ *  furnished to do so, subject to the following conditions:
+ *
+ *  The above copyright notice and this permission notice shall be included in all
+ *  copies or substantial portions of the Software.
+ *
+ *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ *  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ *  SOFTWARE.
+ * ============================================================================
  *
  * Features:
  *   - O(1) Constant Time allocations and deallocations.
@@ -340,17 +364,6 @@ ESTACK_STATIC_ASSERT((ESTACK_MAGIC != 0), "ESTACK_MAGIC must be a non-zero value
  * Minimum alignment is based on the size of uintptr_t.
 */
 #define ESTACK_MIN_ALIGNMENT ((size_t)sizeof(uintptr_t))
-
-/*
- * Configuration: Default Alignment
- * Defines the default memory alignment for the easy memory allocator.
- * Default is 16 bytes, but can be customized by defining EM_DEFAULT_ALIGNMENT before including this header.
-*/
-#ifndef ESTACK_DEFAULT_ALIGNMENT
-#   define ESTACK_DEFAULT_ALIGNMENT 8
-#endif
-ESTACK_STATIC_ASSERT((ESTACK_DEFAULT_ALIGNMENT & (ESTACK_DEFAULT_ALIGNMENT - 1)) == 0, "ESTACK_DEFAULT_ALIGNMENT must be a power of two.");
-ESTACK_STATIC_ASSERT(ESTACK_DEFAULT_ALIGNMENT >= ESTACK_MIN_ALIGNMENT, "ESTACK_DEFAULT_ALIGNMENT must be at least ESTACK_MIN_ALIGNMENT.");
 
 /*
  * Bit-packing Masks and Shifts for `capacity_and_meta_size`
@@ -937,7 +950,6 @@ ESTACKDEF void *estack_alloc_aligned(EStack *ESTACK_RESTRICT stack, size_t size,
     ESTACK_CHECK((size <= capacity),                   NULL, "Internal Error: 'estack_alloc_aligned' called with size exceeding stack capacity");
     ESTACK_CHECK(alignment <= capacity,                NULL, "Internal Error: 'estack_alloc_aligned' alignment exceeds stack capacity");   
     ESTACK_CHECK(alignment >= ESTACK_MIN_ALIGNMENT,    NULL, "Internal Error: 'estack_alloc_aligned' called with too small alignment");
-    ESTACK_CHECK((size <= capacity),                   NULL, "Internal Error: 'estack_alloc_aligned' called with size exceeding stack capacity");
 
     /* 
      * WHY DOING THIS? (The Physics of Inverted Bi-Directional Layout)

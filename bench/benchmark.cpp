@@ -18,7 +18,7 @@
 #endif
 
 // Configure EasyStack directly
-#define ESTACK_SAFETY_POLICY ESTACK_POLICY_DEFENSIVE
+#define ESTACK_SAFETY_POLICY ESTACK_POLICY_CONTRACT
 #define EASY_STACK_IMPLEMENTATION
 #include "easy_stack.h"
 
@@ -277,8 +277,8 @@ int main() {
     double best_wb = get_min_time(times_wb);
     double best_trebi = get_min_time(times_trebi);
 
-    // Calculation of allocator throughput (each iteration does exactly 18 allocator calls)
-    const double total_ops_per_round = (double)pattern_iterations * 18.0;
+    // Calculation of allocator throughput (each iteration does exactly 36 allocator calls)
+    const double total_ops_per_round = (double)pattern_iterations * 36.0;
 
     std::cout << "=== Results (Best of " << ROUNDS << " runs, " << pattern_iterations << " iterations/run) ===\n";
     std::printf("EasyStack:        %.4f sec (%.2f million ops/sec)\n", 

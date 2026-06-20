@@ -25,7 +25,7 @@
 
 <br/>
 
-**An extremely fast, header-only, platform-agnostic, and safe LIFO stack allocator utilizing an inverted bi-directional buffer layout with dynamic metadata scaling.**
+**An absurdly fast, header-only, platform-agnostic, and safe LIFO stack allocator utilizing an inverted bi-directional buffer layout with dynamic metadata scaling.**
 
 ## TL;DR
 
@@ -55,7 +55,7 @@
 
 ## Part of the EasyMem Ecosystem
 
-While **EasyStack** is a powerful standalone allocator, it was originally designed and battle-tested as a core modular component of the `easy_memory` project — a full-fledged, general-purpose memory management system.
+While `easy_stack` is a powerful standalone allocator, it was originally designed and battle-tested as a core modular component of the `easy_memory` project — a full-fledged, general-purpose memory management system.
 
 If your project requires **only** a fast LIFO stack, this library is the perfect, laser-focused tool.
 
@@ -129,9 +129,9 @@ To verify execution speed and memory overhead, `easy_stack` was benchmarked agai
 *   **Trebi StackAllocator:** A standard C++ LIFO stack allocator (compiled with `-flto` for maximum devirtualization).
 
 ### Test Environment
-*   **CPU:** Intel Core i7 / AMD Ryzen (x86_64 @ 4.0 GHz)
-*   **Compiler:** GCC 11.2 with `-O3 -flto -DNDEBUG`
-*   **Scenario:** 2,000,000 iterations per run of nested allocations (up to depth 15) with randomized sizes (16-160 bytes). Best of 25 runs.
+*   **CPU:** AMD Ryzen 7 4700U (8 Cores / 8 Threads, Zen 2 @ up to 4.1 GHz)
+*   **Compiler:** GCC 15.2 with `-O3 -flto -DNDEBUG`
+*   **Scenario:** 2,000,000 iterations per run (executing exactly 72,000,000 allocator operations) of nested allocations (up to depth 15) with randomized sizes (16-160 bytes). Best of 25 runs.
 
 ### 1. Throughput (Speed)
 
@@ -141,8 +141,8 @@ Even when configured with full runtime safety checks (`ESTACK_POLICY_DEFENSIVE`)
   <img src=".github/assets/throughput_chart.png" width="700" alt="Throughput Comparison" />
 </p>
 
-*   **EasyStack (Contract):** **394 Million ops/sec** (~2.5 ns per allocation/free cycle) — **3.37x faster** than traditional implementations.
-*   **EasyStack (Defensive):** **235 Million ops/sec** — still **2.02x faster** than competitors, while providing full runtime LIFO safety and validation.
+*   **easy_stack (Contract):** **790 Million ops/sec** (~1.25 ns per allocation/free cycle) — **3.37x faster** than traditional implementations.
+*   **easy_stack (Defensive):** **472 Million ops/sec** — still **2.02x faster** than competitors, while providing full runtime LIFO safety and validation.
 
 ### 2. Memory Efficiency (Payload vs. Overhead)
 
@@ -308,7 +308,6 @@ Helps detect use-after-free and uninitialized memory usage.
 | `ESTACK_STATIC` | *None* | Declares all functions as `static`, limiting visibility to the current translation unit. |
 | `ESTACK_RESTRICT` | *Auto* | Manually define the `restrict` keyword if your compiler does not support auto-detection. |
 | `ESTACK_NO_ATTRIBUTES` | *None* | Force-disables all compiler-specific attributes (`malloc`, `alloc_size`). |
-| `ESTACK_DEFAULT_ALIGNMENT` | `16` | Baseline alignment for default `estack_alloc()` allocations (must be a power of two). |
 | `ESTACK_MAGIC` | `0xDEADBEEF..` | Magic number used for Stack Marker cryptographic XOR-encryption. |
 
 ---

@@ -29,7 +29,7 @@ labels = [
     'wb_alloc\n(Bundy)', 
     'Trebi LIFO\n(C++)'
 ]
-throughput = [393.98, 235.86, 117.01, 99.72] 
+throughput = [790.17, 472.26, 230.24, 199.36]
 colors = [COLOR_EASY_2B, COLOR_EASY_4B, COLOR_COMPETITOR, '#222831']
 
 bars = ax.barh(labels, throughput, color=colors, height=0.55, edgecolor='#222831', linewidth=1)
@@ -44,25 +44,25 @@ ref_value = throughput[2]  # wb_alloc is the reference
 for i, bar in enumerate(bars):
     width = bar.get_width()
     
-    if i == 0:
+    if i == 0:  # EasyStack Contract
         ratio = width / ref_value
-        text = f"{width:.1f} M   ({ratio:.2f}x faster vs Bundy)"
+        text = f"{width:.1f} M\n({ratio:.2f}x vs Bundy)"
         text_color = COLOR_EASY_2B
-    elif i == 1:
+    elif i == 1:  # EasyStack Defensive
         ratio = width / ref_value
-        text = f"{width:.1f} M   ({ratio:.2f}x faster vs Bundy)"
+        text = f"{width:.1f} M\n({ratio:.2f}x vs Bundy)"
         text_color = COLOR_EASY_2B
-    elif i == 2:
-        text = f"{width:.1f} M   (C Reference)"
+    elif i == 2:  # wb_alloc (Bundy)
+        text = f"{width:.1f} M\n(C Reference)"
         text_color = TEXT_COLOR
-    else:
+    else:  # Trebi (C++)
         text = f"{width:.1f} M"
         text_color = TEXT_COLOR
         
     ax.text(width + 8, bar.get_y() + bar.get_height()/2, text, 
             va='center', ha='left', color=text_color, fontsize=9.5, fontweight='bold')
 
-ax.set_xlim(0, 650)
+ax.set_xlim(0, 1000)
 plt.title('Throughput Comparison (Higher is Better)', color=TEXT_COLOR, fontsize=13, fontweight='bold', pad=15)
 plt.tight_layout()
 plt.savefig('throughput_chart.png', dpi=300, transparent=True)
