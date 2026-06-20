@@ -1214,7 +1214,7 @@ ESTACKDEF void estack_free(EStack *ESTACK_RESTRICT stack, void *pointer) {
     size_t prev_offset = (cur_index - 1 == 0) ? 0 : estack_read_meta(stack, meta_type, cur_index - 2);
     size_t poison_size = right_offset - prev_offset;
     
-    memset(head_ptr, ESTACK_POISON_BYTE, poison_size);
+    memset((void *)head_ptr, ESTACK_POISON_BYTE, poison_size);
     #endif
 
     estack_set_meta_index(stack, cur_index - 1);
