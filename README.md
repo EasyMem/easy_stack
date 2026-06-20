@@ -31,7 +31,7 @@
 
 **What is it?** A portable, extremely fast, single-header stack allocator that completely decouples control paths from aligned user payloads. It eliminates inline metadata overhead entirely by growing tracking offsets forward and aligned payloads backward.
 
-**Why use it?** To achieve deterministic **O(1)** allocation and deallocation speeds that outperform traditional C allocators (like `wb_alloc`) by up to **3.3x+** and compile-time optimized C++ templates (like `trebi`) by up to **3.9x+** in trusted mode (while remaining **2x+ faster** than both even with full runtime defensive safety active), all while retaining up to an **8x smaller metadata footprint**.
+**Why use it?** To achieve deterministic **O(1)** allocation and deallocation speeds that outperform traditional C allocators (like `wb_alloc`) by up to **3.5x+** and compile-time optimized C++ templates (like `trebi`) by up to **4.1x+** in trusted mode (while remaining **2x+ faster** than both even with full runtime defensive safety active), all while retaining up to an **8x smaller metadata footprint**.
 
 **How to use it?** `#define EASY_STACK_IMPLEMENTATION` in one `.c` file, then just `#include "easy_stack.h"`.
 
@@ -41,12 +41,12 @@
 
 *   **Inverted Bi-Directional Layout:** Metadata offsets grow forward from the header (lowest addresses), while aligned user payloads grow backward from the end of the buffer (highest addresses). They meet in the middle. This physical segregation isolates metadata from payload alignment gaps, resulting in **zero alignment padding waste** in the control zone.
 *   **Dynamic Metadata Bit-Width Scaling:** Unlike traditional stack allocators that prefix each allocation with a fixed-size inline header (typically 16 bytes on 64-bit platforms), `easy_stack` dynamically scales metadata cells to 1, 2, 4, or 8 bytes based on overall buffer capacity. For standard frame workloads (< 64 KB), offset cells take only 2 bytes—unlocking up to an **8x reduction in metadata overhead**.
-*   **L1 Cache Line "Free Lunch" Optimization:** The compact `EStack` header requires only 2 machine words (16 bytes on 64-bit systems). Since a standard CPU L1 data cache line is 64 bytes, fetching the stack header into cache automatically and instantly prefetches the first 48 bytes of the metadata array for free. For standard workloads (< 64 KB), this means the **first 24 allocation offsets are prefetched instantly**, resolving initial operations completely within the L1 cache and bypassing main memory latency entirely.
+*   **L1 Cache Line "Free Lunch" Optimization:** The compact `EStack` header requires only 2 machine words (16 bytes on 64-bit systems). By default, on modern desktop and application processors, the library automatically aligns the header boundary to 64-byte or 32-byte cache lines. This guarantees that fetching the stack header into cache automatically and instantly prefetches the **first 24 active metadata offsets** for **free**, bypassing main memory latency entirely.
 *   **XOR-Hardened Stack Markers:** Rollback states (markers) are encrypted by XORing the current allocation index and signature with the stack's base memory address and `ESTACK_MAGIC`. This completely prevents cross-allocator marker pollution (e.g., passing Stack A's marker to Stack B) and detects forged marker rollbacks with **zero mathematical overhead** (1-cycle XOR instructions).
 *   **Zero-Multiplication Boundary Checks:** Completely eliminates expensive CPU multiplication (`imul`) instructions from the critical allocation path. Since the metadata array cell widths are scaled strictly to powers of two ($1, 2, 4, \text{or } 8$ bytes), calculating the current metadata offset boundary is resolved using an ultra-fast bitwise shift left (`<< meta_type`). This reduces the boundary check to a single addition and shift, executing in just 1-2 CPU cycles.
 *   **Arbitrary Power-of-Two Alignment:** Supports customized alignment boundaries (powers of two) for individual allocations, up to the stack's total capacity. Essential for SIMD vectors, cache-line aligned arrays, and hardware DMA buffers.
 *   **Compiler Agnostic & Optimization Resilient:** Verified to work flawlessly across all compiler optimization levels (`-O1` through `-O3`, `-Os`, `-Oz`, `/O1`, `/O2`, `/Ox`). Built with strict adherence to **Strict Aliasing** rules, ensuring that aggressive compiler optimizations never break internal layout mechanics.
-*   **Minimal Header Footprint:** The `EStack` header is extremely compact, consuming exactly 2 machine words (16 bytes on 64-bit systems, 8 bytes on 32-bit systems) to store overall capacity, dynamic metadata bit-width, allocation index, and the dynamic allocation flag. This maximizes the ratio of usable payload space within any provided memory buffer.
+*   **Minimal Header Footprint:** The `EStack` header is extremely compact, consuming exactly 2 machine words (16 bytes on 64-bit systems, 8 bytes on 32-bit systems) to store overall capacity, dynamic metadata bit-width, allocation index, and the dynamic allocation flag. If `ESTACK_NO_ALIGN_HEADER` is defined (which is forced automatically on 8/16-bit platforms), the header alignment padding is completely eliminated to maximize usable space.
 *   **Concurrency Model:** Intentionally lock-free and single-threaded to avoid mutex overhead. Designed for **Thread-Local Storage (TLS)** patterns (one `EStack` instance per thread).
 *   **Embedded and Bare-Metal Ready:** Zero dependencies on standard `libc` heap managers. Can compile on bare-metal architectures with zero feature degradation (`ESTACK_NO_MALLOC`).
 *   **Full C++ Compatibility:** Wrapped in `extern "C"` for seamless integration into both C and C++ codebases.
@@ -141,8 +141,8 @@ Even when configured with full runtime safety checks (`ESTACK_POLICY_DEFENSIVE`)
   <img src=".github/assets/throughput_chart.png" width="700" alt="Throughput Comparison" />
 </p>
 
-*   **easy_stack (Contract):** **790 Million ops/sec** (~1.25 ns per allocation/free cycle) — **3.37x faster** than traditional implementations.
-*   **easy_stack (Defensive):** **472 Million ops/sec** — still **2.02x faster** than competitors, while providing full runtime LIFO safety and validation.
+*   **EasyStack (Contract):** **820 Million ops/sec** (~1.22 ns per allocation/free cycle) — **3.56x faster** than traditional implementations.
+*   **EasyStack (Defensive):** **470 Million ops/sec** (~2.12 ns per cycle) — still **2.06x faster** than competitors, while providing full runtime LIFO safety and validation.
 
 ### 2. Memory Efficiency (Payload vs. Overhead)
 
@@ -205,14 +205,15 @@ Excellent for memory-critical systems, RTOS tasks, and microcontrollers (ARM Cor
 ```c
 #define EASY_STACK_IMPLEMENTATION
 #define ESTACK_NO_MALLOC // Disables heap-based estack_create()
-
 #include "easy_stack.h"
 
-// Pre-allocate raw buffer on stack frame or as static global BSS
-uint8_t memory_pool[4096];
+// Pre-allocate raw buffer on stack frame or as static global BSS with
+// EXACTLY 1024 bytes of guaranteed usable payload capacity.
+// The helper macro automatically handles header size and optimal alignment padding.
+uint8_t memory_pool[ESTACK_REQUIRED_BUFFER_SIZE(1024)];
 
 int main(void) {
-    // Transform raw buffer into a safe stack allocator
+    // Transform raw buffer into a safe, optimally aligned stack allocator
     EStack *stack = estack_create_static(memory_pool, sizeof(memory_pool));
     
     // Allocate word-aligned memory
@@ -225,6 +226,24 @@ int main(void) {
     estack_destroy(stack);
     return 0;
 }
+```
+
+#### Microcontroller Optimization (Zero Alignment Waste)
+For highly memory-constrained 8/16/32-bit microcontrollers, you can completely strip out all alignment math and padding gaps on both the header and user payloads:
+
+```c
+#define EASY_STACK_IMPLEMENTATION
+#define ESTACK_NO_MALLOC       // Disable heap allocations
+#define ESTACK_NO_AUTO_ALIGN   // Force 1-byte user payload alignment (no padding)
+#define ESTACK_NO_ALIGN_HEADER // Force 1-byte header alignment (no padding, auto-enabled on 16-bit)
+#include "easy_stack.h"
+
+// Request EXACTLY 512 bytes of usable memory.
+// Due to the optimization macros above, this array compiles to consume exactly:
+//   - 520 bytes of RAM on 32-bit MCUs (8 bytes header + 512 bytes payload)
+//   - 516 bytes of RAM on 16-bit MCUs (4 bytes header + 512 bytes payload)
+// Absolutely zero bytes are wasted on alignment padding or compiler gaps!
+uint8_t memory_pool[ESTACK_REQUIRED_BUFFER_SIZE(512)];
 ```
 
 ### 4. Rollback via Hardened Stack Markers
@@ -277,6 +296,11 @@ Controls the balance between absolute execution speed and runtime resilience.
 | **0** | **CONTRACT** | **Design-by-Contract.** All checks are delegated to `ESTACK_ASSERT`. Misuse leads to immediate abort (Debug) or UB (Release). | Performance-critical / Production-Tested |
 | **1** | **DEFENSIVE** | **Fault-Tolerance (Default).** Performs robust 'if' checks. Gracefully returns `NULL` or exits on API misuse. | Production / General Purpose |
 
+> [!IMPORTANT]
+> **Structural Safety Guarantee:** 
+> Even in **CONTRACT** mode with all assertions completely compiled out for Release, `easy_stack` remains **inherently safe against buffer overflows and stack collisions**. 
+> The core collision detection boundary check (`aligned_ptr < meta_end`) is a fundamental structural part of the allocation algorithm itself and is **never compiled out**. The `CONTRACT` policy only strips away defensive API misuse validations (such as NULL-pointer sanitization or empty-stack pop checks), ensuring raw hardware-level performance without sacrificing memory safety boundaries.
+
 ### Assertion Strategy
 
 Determines how the library handles internal invariant violations.
@@ -308,7 +332,10 @@ Helps detect use-after-free and uninitialized memory usage.
 | `ESTACK_STATIC` | *None* | Declares all functions as `static`, limiting visibility to the current translation unit. |
 | `ESTACK_RESTRICT` | *Auto* | Manually define the `restrict` keyword if your compiler does not support auto-detection. |
 | `ESTACK_NO_ATTRIBUTES` | *None* | Force-disables all compiler-specific attributes (`malloc`, `alloc_size`). |
-| `ESTACK_MAGIC` | `0xDEADBEEF..` | Magic number used for Stack Marker XOR-encryption. |
+| `ESTACK_NO_AUTO_ALIGN` | *None* | Completely disables user payload alignment (forces 1-byte boundary). Highly recommended for 8/16-bit MCUs to save memory. |
+| `ESTACK_NO_ALIGN_HEADER` | *None* | Completely disables context header alignment (forces 1-byte boundary). Automatically enabled on 8/16-bit systems to eliminate padding waste. |
+| `ESTACK_DEFAULT_HEADER_ALIGNMENT` | *Auto* | Override the optimal context header alignment boundary (defaults to 64-byte for 64-bit, 32-byte for 32-bit platforms to prevent L1 cache line splits). |
+| `ESTACK_MAGIC` | `0xDEADBEEF..` | Magic number used for Stack Marker cryptographic XOR-encryption. |
 
 ---
 

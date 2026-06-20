@@ -65,6 +65,11 @@
  *    #define ESTACK_NO_POISONING      // Force DISABLE poisoning (even in Debug)
  *    #define ESTACK_POISON_BYTE 0xDD  // Custom byte pattern for freed memory
  *
+ *  ALIGNMENT & OPTIMIZATION:
+ *    #define ESTACK_NO_AUTO_ALIGN                  // Disable user payload alignment (saves MCU RAM)
+ *    #define ESTACK_NO_ALIGN_HEADER                // Disable EStack header alignment (saves MCU RAM)
+ *    #define ESTACK_DEFAULT_HEADER_ALIGNMENT <val> // Override optimal header alignment (defaults to 64/32/word bytes)
+ *
  *  SYSTEM & LINKAGE:
  *    #define ESTACK_STATIC            // Make all functions static (Private linkage)
  *    #define ESTACK_RESTRICT          // Manual override for 'restrict' keyword definition
@@ -360,10 +365,47 @@ ESTACK_STATIC_ASSERT((ESTACK_POISON_BYTE >= 0x00) && (ESTACK_POISON_BYTE <= 0xFF
 ESTACK_STATIC_ASSERT((ESTACK_MAGIC != 0), "ESTACK_MAGIC must be a non-zero value to ensure effective validation.");
 
 /*
- * Constant: Minimum Alignment Limit
- * Minimum alignment is based on the size of uintptr_t.
-*/
-#define ESTACK_MIN_ALIGNMENT ((size_t)sizeof(uintptr_t))
+ * Configuration: Minimum Alignment Limit
+ * 
+ * Minimum payload alignment boundary (machine-word size).
+ * Defined only if payload alignment is enabled (ESTACK_NO_AUTO_ALIGN is NOT defined).
+ */
+#ifndef ESTACK_NO_AUTO_ALIGN
+#   define ESTACK_MIN_ALIGNMENT ((size_t)sizeof(uintptr_t))
+#endif
+
+/*
+ * Configuration: Header Alignment Selection
+ * 
+ * Automatically forces ESTACK_NO_ALIGN_HEADER on 16-bit or 8-bit systems.
+ */
+#if !defined(ESTACK_NO_ALIGN_HEADER) && (UINTPTR_MAX <= 0xFFFFU)
+#   define ESTACK_NO_ALIGN_HEADER
+#endif
+
+/*
+ * Configuration: Header Alignment Selection
+ * 
+ * Configures the optimal alignment boundary for the EStack context header.
+ * - If ESTACK_NO_ALIGN_HEADER is defined, alignment is disabled (1-byte).
+ * - If UINTPTR_MAX <= 0xFFFF (16-bit or 8-bit), we automatically force ESTACK_NO_ALIGN_HEADER.
+ * - For modern 64-bit desktop/server architectures, we default to 64-byte alignment
+ *   to guarantee the L1 cache-line "free lunch" prefetching.
+ * - For 32-bit application processors (x86, ARM Cortex-A), we default to 32-byte alignment
+ *   to match their typical L1 cache line size while minimizing memory overhead.
+ * - Otherwise, falls back to standard machine-word alignment.
+ */
+#ifndef ESTACK_NO_ALIGN_HEADER
+#   ifndef ESTACK_DEFAULT_HEADER_ALIGNMENT
+#       if defined(__x86_64__) || defined(__aarch64__) || defined(_M_X64) || defined(_M_ARM64)
+#           define ESTACK_DEFAULT_HEADER_ALIGNMENT ((size_t)64) // 64-byte cache line for 64-bit platforms
+#   	elif defined(__i386__) || defined(__arm__) || defined(_M_IX86)
+#           define ESTACK_DEFAULT_HEADER_ALIGNMENT ((size_t)32) // 32-byte cache line for 32-bit platforms
+#   	else
+#           define ESTACK_DEFAULT_HEADER_ALIGNMENT ((size_t)sizeof(uintptr_t)) // Fallback to word alignment
+#       endif
+#   endif
+#endif
 
 /*
  * Bit-packing Masks and Shifts for `capacity_and_meta_size`
@@ -439,6 +481,22 @@ struct EStack {
     uintptr_t meta_index;          // 1-based active allocation cursor
 };
 
+/*
+ * Helper Macro: ESTACK_REQUIRED_BUFFER_SIZE
+ *
+ * Calculates the exact raw buffer size (in bytes) required to guarantee
+ * a specific usable payload capacity, accounting for the EStack header
+ * and the maximum potential alignment padding.
+ *
+ * Usage:
+ *   uint8_t memory_pool[ESTACK_REQUIRED_BUFFER_SIZE(1024)]; // Exactly 1024 bytes of usable space
+ *   EStack *stack = estack_create_static(memory_pool, sizeof(memory_pool));
+ */
+#ifdef ESTACK_NO_ALIGN_HEADER
+#   define ESTACK_REQUIRED_BUFFER_SIZE(capacity) (sizeof(EStack) + (size_t)(capacity))
+#else
+#   define ESTACK_REQUIRED_BUFFER_SIZE(capacity) (sizeof(EStack) + (size_t)(capacity) + ESTACK_DEFAULT_HEADER_ALIGNMENT)
+#endif
 
 /*
  * Stack Allocator Rollback Marker (EStackMarker)
@@ -772,12 +830,27 @@ static inline void estack_write_meta(EStack *stack, size_t meta_type, size_t ind
  * safe LIFO stack allocator. This is the primary initialization function for 
  * bare-metal, stack-allocated, or shared memory environments.
  *
- * Flexible Input Handling:
- *   The function is designed to handle "crooked" or unaligned input pointers. 
- *   It will automatically shift its internal starting position to the nearest 
- *   required machine-word boundary (ESTACK_MIN_ALIGNMENT). 
- *   Note: This internal alignment shift slightly reduces the usable capacity 
- *   from the provided total 'size'.
+ * Header Alignment and Memory Overhead:
+ *   To achieve the L1 cache-line "free lunch" prefetching, the function automatically
+ *   aligns the starting address of the EStack structure to the boundary configured by
+ *   ESTACK_DEFAULT_HEADER_ALIGNMENT (64 bytes on 64-bit systems, 32 bytes on 32-bit systems).
+ *
+ *   This self-alignment shift might introduce a padding overhead, reducing the usable 
+ *   capacity from the provided total 'size' by up to:
+ *     - 63 bytes on 64-bit systems (x86_64, aarch64)
+ *     - 31 bytes on 32-bit systems (x86_32, arm32)
+ *
+*   If you need to guarantee EXACTLY 'C' bytes of usable payload capacity, you should 
+ *   define your static buffer size using the helper macro:
+ *     uint8_t buffer[ESTACK_REQUIRED_BUFFER_SIZE(C)];
+ *
+ *   This automatically handles the EStack header size and the system's optimal
+ *   alignment padding (ESTACK_DEFAULT_HEADER_ALIGNMENT) behind the scenes.
+ *
+ *   For memory-constrained microcontrollers where cache alignment is not critical or 
+ *   the hardware natively supports fast arbitrary/unaligned memory reads, you can completely 
+ *   disable this header alignment overhead by defining ESTACK_NO_ALIGN_HEADER before 
+ *   including this header. This forces 1-byte header alignment, eliminating all alignment waste.
  *
  * Capacity Limits:
  *   - Minimum: ESTACK_MIN_SIZE (calculated as sizeof(EStack) + ESTACK_MIN_BUFFER_SIZE).
@@ -806,10 +879,15 @@ ESTACKDEF EStack *estack_create_static(void *ESTACK_RESTRICT memory, size_t size
     ESTACK_CHECK(size >= ESTACK_MIN_SIZE, NULL, "EStack: 'estack_create_static' buffer size is below ESTACK_MIN_SIZE");
     ESTACK_CHECK(size <= ESTACK_MAX_SIZE, NULL, "EStack: 'estack_create_static' buffer size exceeds maximum limit");
 
-    // Align the raw address to the minimum required word boundary
+    #ifdef ESTACK_NO_ALIGN_HEADER
+    uintptr_t aligned_addr = (uintptr_t)memory;
+    size_t padding = 0;
+    #else
+    // Align the raw address to the selected header boundary (cache-line or word)
     uintptr_t raw_addr = (uintptr_t)memory;
-    uintptr_t aligned_addr = align_up(raw_addr, ESTACK_MIN_ALIGNMENT);
+    uintptr_t aligned_addr = align_up(raw_addr, ESTACK_DEFAULT_HEADER_ALIGNMENT);
     size_t padding = aligned_addr - raw_addr;
+    #endif
 
     // Check if the remaining buffer is still large enough after alignment adjustment
     // LCOV_EXCL_START
@@ -874,8 +952,11 @@ ESTACKDEF EStack *estack_create(size_t capacity) {
     ESTACK_CHECK(capacity >= ESTACK_MIN_BUFFER_SIZE, NULL, "EStack: requested capacity is too small");
     ESTACK_CHECK(capacity <= ESTACK_MAX_SIZE, NULL, "EStack: requested capacity exceeds limits");
 
-    // Total required space = Header + payload capacity
-    size_t total_size = sizeof(EStack) + capacity;
+    #ifdef ESTACK_NO_ALIGN_HEADER
+    size_t total_size = sizeof(EStack) + capacity + sizeof(uintptr_t);
+    #else
+    size_t total_size = sizeof(EStack) + capacity + ESTACK_DEFAULT_HEADER_ALIGNMENT + sizeof(uintptr_t);
+    #endif
     
     void *raw_mem = malloc(total_size);
     // LCOV_EXCL_START
@@ -884,8 +965,11 @@ ESTACKDEF EStack *estack_create(size_t capacity) {
     }
     // LCOV_EXCL_STOP
 
+    void *static_mem = (char *)raw_mem + sizeof(uintptr_t);
+    size_t static_size = total_size - sizeof(uintptr_t);
+
     // Delegate construction to static initializer
-    EStack *stack = estack_create_static(raw_mem, total_size);
+    EStack *stack = estack_create_static(static_mem, static_size);
     // LCOV_EXCL_START
     if (!stack) {
         free(raw_mem);
@@ -895,6 +979,8 @@ ESTACKDEF EStack *estack_create(size_t capacity) {
 
     // Set the dynamic allocation flag to notify the destructor to call free()
     estack_set_is_dynamic(stack, true);
+
+    ((uintptr_t *)stack)[-1] = (uintptr_t)raw_mem; // Store the original malloc pointer just before the stack header for later deallocation
 
     return stack;
 }
@@ -1036,11 +1122,43 @@ ESTACKDEF void *estack_alloc_aligned(EStack *ESTACK_RESTRICT stack, size_t size,
  * Safety & Behavior:
  *   - Subject to the same Safety Policies and limits as estack_alloc_aligned.
  */
+#ifndef ESTACK_NO_AUTO_ALIGN
 ESTACKDEF void *estack_alloc(EStack *ESTACK_RESTRICT stack, size_t size) {
     ESTACK_CHECK(stack != NULL, NULL, "Internal Error: 'estack_alloc' called on NULL stack pointer");
 
     return estack_alloc_aligned(stack, size, ESTACK_MIN_ALIGNMENT);
 }
+
+#else
+ESTACKDEF void *estack_alloc(EStack *ESTACK_RESTRICT stack, size_t size) {
+    ESTACK_CHECK(stack != NULL,      NULL, "Internal Error: 'estack_alloc' called on NULL stack");
+    ESTACK_CHECK(size > 0,           NULL, "Internal Error: 'estack_alloc' called with zero size");
+    size_t capacity = estack_get_capacity(stack);
+    ESTACK_CHECK((size <= capacity), NULL, "Internal Error: 'estack_alloc' called with size exceeding stack capacity");
+
+    size_t meta_type = estack_get_meta_type(stack);
+    size_t cur_index = estack_get_meta_index(stack);
+    
+    // Fetch the relative payload offset of the last allocated block
+    size_t right_offset = (cur_index == 0) ? 0 : estack_read_meta(stack, meta_type, cur_index - 1);
+    
+    // Total backward offset after this allocation
+    size_t new_right_offset = right_offset + size;
+    
+    // Collision check: total metadata size + total payload offset must not exceed capacity
+    if (new_right_offset + ((cur_index + 1) << meta_type) > capacity) {
+        return NULL; // Stack Overflow: collision detected
+    }
+
+    // Write metadata tracking cell and advance the allocation index
+    estack_write_meta(stack, meta_type, cur_index, new_right_offset);
+    estack_set_meta_index(stack, cur_index + 1);
+
+    // Compute and return the final raw pointer
+    uintptr_t payload_end = (uintptr_t)stack + sizeof(EStack) + capacity;
+    return (void *)(payload_end - new_right_offset);
+}
+#endif 
 
 /*
  * Free a memory chunk back to the Stack
@@ -1312,7 +1430,9 @@ ESTACKDEF void estack_destroy(EStack *stack) {
     #ifndef ESTACK_NO_MALLOC
     // Check if the stack header has the dynamic allocation flag bit set
     if (estack_get_is_dynamic(stack)) {
-        free(stack);
+        // Retrieve the original unaligned pointer stored in the padding slot
+        void *raw_mem = (void *)((uintptr_t *)stack)[-1];
+        free(raw_mem);
     }
     #endif // ESTACK_NO_MALLOC
 }

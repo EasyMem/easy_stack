@@ -29,7 +29,7 @@ labels = [
     'wb_alloc\n(Bundy)', 
     'Trebi LIFO\n(C++)'
 ]
-throughput = [790.17, 472.26, 230.24, 199.36]
+throughput = [820.0, 470.0, 228.0, 199.0] 
 colors = [COLOR_EASY_2B, COLOR_EASY_4B, COLOR_COMPETITOR, '#222831']
 
 bars = ax.barh(labels, throughput, color=colors, height=0.55, edgecolor='#222831', linewidth=1)
@@ -62,7 +62,7 @@ for i, bar in enumerate(bars):
     ax.text(width + 8, bar.get_y() + bar.get_height()/2, text, 
             va='center', ha='left', color=text_color, fontsize=9.5, fontweight='bold')
 
-ax.set_xlim(0, 1000)
+ax.set_xlim(0, 1050)
 plt.title('Throughput Comparison (Higher is Better)', color=TEXT_COLOR, fontsize=13, fontweight='bold', pad=15)
 plt.tight_layout()
 plt.savefig('throughput_chart.png', dpi=300, transparent=True)

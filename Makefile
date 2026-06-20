@@ -1,4 +1,4 @@
-# Makefile for compiling and running easy_stack allocator tests
+# Makefile for compiling and running easy_stack allocator tests, fuzzers and benchmarks
 
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
@@ -68,10 +68,17 @@ FUZZ_DEBUG_BINS = $(FUZZ_SRCS:%.c=%_debug)
 FUZZ_FLAGS = -fsanitize=fuzzer,address,undefined -O3 -g3 -fno-omit-frame-pointer
 FUZZ_DEBUG_FLAGS = -fsanitize=fuzzer,address,undefined -O0 -g3 -fno-omit-frame-pointer -DESTACK_FUZZ_DEBUG -DDEBUG
 
+# --- Benchmark Configuration ---
+BENCH_DIR = bench
+BENCH_SRCS = $(BENCH_DIR)/benchmark.cpp $(BENCH_DIR)/Allocator.cpp $(BENCH_DIR)/StackAllocator.cpp
+BENCH_BIN = $(BENCH_DIR)/benchmark
+CXX ?= g++
+CXXFLAGS = -O3 -std=c++17 -flto -DNDEBUG -Wno-stringop-overflow -I. -I$(BENCH_DIR)
+
 # Define the primary source file to check coverage for.
 COVERAGE_SRC = easy_stack.h
 
-.PHONY: all clean run tests tests_full list coverage build_coverage
+.PHONY: all clean run tests tests_full list coverage build_coverage bench
 
 # Default goal: show available commands
 .DEFAULT_GOAL := list
@@ -86,13 +93,9 @@ $(TEST_DIR)/%_debug: $(TEST_DIR)/%.c easy_stack.h $(TEST_DIR)/test_utils.h
 	$(CC) $(CFLAGS) $(DEBUG_FLAGS) $(SAN_FLAGS) $< -o $@
 
 # --- Coverage Build Steps ---
-# 1. Compile source files into object files with coverage flags
-#    This generates the .gcno files alongside the object files.
 $(TEST_DIR)/%.cov.o: $(TEST_DIR)/%.c easy_stack.h $(TEST_DIR)/test_utils.h
 	$(CC) $(CFLAGS) $(COV_FLAGS) -c $< -o $@
 
-# 2. Link object files into executables
-#    We still need COV_FLAGS during linking for gcov to work correctly.
 $(TEST_DIR)/%_coverage: $(TEST_DIR)/%.cov.o
 	$(CC) $(CFLAGS) $(COV_FLAGS) $^ $(LDFLAGS_COV) -o $@
 # --- End Coverage Build Steps ---
@@ -165,7 +168,7 @@ tests_full: build_debug
 		printf "\nAll tests PASSED!\n"; \
 	fi
 
-# Coverage: build with coverage flags and run tests to generate .gcda/.gcno files
+# Coverage: build with coverage flags and run tests
 coverage: clean build_coverage
 	@printf "Running all tests to generate coverage data...\n"
 	@exit_code=0; \
@@ -272,6 +275,17 @@ test_matrix:
 clean_matrix:
 	rm -rf $(MATRIX_DIR)
 
+
+# --- Benchmark Target ---
+$(BENCH_BIN): $(BENCH_SRCS) easy_stack.h
+	@printf "Compiling benchmark suite: $@\n"
+	@$(CXX) $(CXXFLAGS) $(BENCH_SRCS) -o $@
+
+bench: $(BENCH_BIN)
+	@printf "\n--- Running Stack Allocator Benchmarks ---\n"
+	@./$(BENCH_BIN)
+
+
 # Cleaning binary files and coverage files
 clean:
 	rm -f $(TEST_SRCS:%.c=%_silent) $(TEST_SRCS:%.c=%_debug) $(TEST_COV_BINS)
@@ -281,6 +295,7 @@ clean:
 	rm -f coverage.info
 	rm -f $(FUZZ_BINS) $(FUZZ_DEBUG_BINS)
 	rm -rf $(MATRIX_DIR)
+	rm -f $(BENCH_BIN) # Clean benchmark binary
 
 
 # --- Fuzzing Targets ---
@@ -314,6 +329,8 @@ list:
 	@printf "Available commands:\n"
 	@printf "  make tests                    - run all tests without debug output \n"
 	@printf "  make tests_full               - run all tests with debug output\n"
+	@printf "  make test_matrix -j$(nproc)   - run matrix of tests\n"
+	@printf "  make bench                    - compile and run stupidly fast allocator benchmarks\n"
 	@printf "  make coverage                 - build & run tests to generate coverage data for CodeCov\n"
 	@printf "  make fuzz_[name]              - run the 'core' fuzzer for 5 minutes (auto-detects fuzz_*.c)\n"
 	@printf "  make replay_[name] CRASH=...  - replay a specific crash file with ASCII visualization\n"

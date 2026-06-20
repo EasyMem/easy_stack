@@ -18,7 +18,7 @@
 #endif
 
 // Configure EasyStack directly
-#define ESTACK_SAFETY_POLICY ESTACK_POLICY_CONTRACT
+#define ESTACK_SAFETY_POLICY ESTACK_POLICY_DEFENSIVE
 #define EASY_STACK_IMPLEMENTATION
 #include "easy_stack.h"
 
@@ -281,7 +281,7 @@ int main() {
     const double total_ops_per_round = (double)pattern_iterations * 36.0;
 
     std::cout << "=== Results (Best of " << ROUNDS << " runs, " << pattern_iterations << " iterations/run) ===\n";
-    std::printf("EasyStack:        %.4f sec (%.2f million ops/sec)\n", 
+    std::printf("EasyStack:         %.4f sec (%.2f million ops/sec)\n", 
            best_easy, total_ops_per_round / best_easy / 1e6);
            
     std::printf("wb_alloc (Bundy):  %.4f sec (%.2f million ops/sec)\n", 
