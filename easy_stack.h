@@ -1013,7 +1013,10 @@ ESTACKDEF EStack *estack_create(size_t capacity) {
     // Set the dynamic allocation flag to notify the destructor to call free()
     estack_set_is_dynamic(stack, true);
 
-    ((uintptr_t *)stack)[-1] = (uintptr_t)raw_mem; // Store the original malloc pointer just before the stack header for later deallocation
+    // Store the original malloc pointer just before the stack header for later deallocation
+    char *store_dest = (char *)stack - sizeof(uintptr_t);
+    uintptr_t raw_val = (uintptr_t)raw_mem;
+    memcpy(store_dest, &raw_val, sizeof(uintptr_t));
 
     return stack;
 }
@@ -1464,7 +1467,10 @@ ESTACKDEF void estack_destroy(EStack *stack) {
     // Check if the stack header has the dynamic allocation flag bit set
     if (estack_get_is_dynamic(stack)) {
         // Retrieve the original unaligned pointer stored in the padding slot
-        void *raw_mem = (void *)((uintptr_t *)stack)[-1];
+        const char *read_src = (const char *)stack - sizeof(uintptr_t);
+        uintptr_t raw_val;
+        memcpy(&raw_val, read_src, sizeof(uintptr_t));
+        void *raw_mem = (void *)raw_val;
         free(raw_mem);
     }
     #endif // ESTACK_NO_MALLOC
