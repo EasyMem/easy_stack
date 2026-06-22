@@ -28,7 +28,7 @@ BASE_CFLAGS = -Werror -Wall -Wextra \
 	     -Wshadow \
 		 -Wconversion -Wsign-conversion \
 		 -Wundef \
-		 -Wstrict-aliasing=2 \
+		 -Wstrict-aliasing=1 \
 		 -Wpointer-arith \
 		 -Wdouble-promotion \
 		 -Wcast-align \

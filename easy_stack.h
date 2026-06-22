@@ -772,25 +772,31 @@ static inline size_t estack_read_meta(const EStack *stack, size_t meta_type, siz
 
     // Case 1 (< 64 KB): Highly likely scenario for thread-local/scratchpad workloads
     if (ESTACK_LIKELY(meta_type == 1)) {
-        return ((uint16_t *)(void *)end_of_stack_header)[index];
+        uint16_t val;
+        memcpy(&val, (const void *)(end_of_stack_header + (index * sizeof(uint16_t))), sizeof(uint16_t));
+        return val;
     }
     
     // Case 2 (< 4 GB): Highly likely scenario for large desktop/game-engine stacks
 #if UINTPTR_MAX >= 0xFFFFFFFFUL
     if (ESTACK_LIKELY(meta_type == 2)) {
-        return ((uint32_t *)(void *)end_of_stack_header)[index];
+        uint32_t val;
+        memcpy(&val, (const void *)(end_of_stack_header + (index * sizeof(uint32_t))), sizeof(uint32_t));
+        return val;
     }
 #endif
 
     // Case 0 (< 256 B): Micro-allocations or small static buffers
     if (meta_type == 0) {
-        return ((uint8_t *)(void *)end_of_stack_header)[index];
+        return ((const uint8_t *)(const void *)end_of_stack_header)[index];
     }
 
     // Case 3 (>= 4 GB): Highly unlikely for standard stack allocators
 #if UINTPTR_MAX == 0xFFFFFFFFFFFFFFFFULL
     if (ESTACK_UNLIKELY(meta_type == 3)) {
-        return ((uint64_t *)(void *)end_of_stack_header)[index];
+        uint64_t val;
+        memcpy(&val, (const void *)(end_of_stack_header + (index * sizeof(uint64_t))), sizeof(uint64_t));
+        return val;
     }
 #endif
 
@@ -810,14 +816,16 @@ static inline void estack_write_meta(EStack *stack, size_t meta_type, size_t ind
 
     // Case 1 (< 64 KB): Highly likely scenario for thread-local/scratchpad workloads
     if (ESTACK_LIKELY(meta_type == 1)) {
-        ((uint16_t *)(void *)end_of_stack_header)[index] = (uint16_t)value;
+        uint16_t val16 = (uint16_t)value;
+        memcpy((void *)(end_of_stack_header + index * sizeof(uint16_t)), &val16, sizeof(uint16_t));
         return;
     }
     
     // Case 2 (< 4 GB): Highly likely scenario for large desktop/game-engine stacks
 #if UINTPTR_MAX >= 0xFFFFFFFFUL
     if (ESTACK_LIKELY(meta_type == 2)) {
-        ((uint32_t *)(void *)end_of_stack_header)[index] = (uint32_t)value;
+        uint32_t val32 = (uint32_t)value;
+        memcpy((void *)(end_of_stack_header + index * sizeof(uint32_t)), &val32, sizeof(uint32_t));
         return;
     }
 #endif
@@ -831,7 +839,8 @@ static inline void estack_write_meta(EStack *stack, size_t meta_type, size_t ind
     // Case 3 (>= 4 GB): Highly unlikely for standard stack allocators
 #if UINTPTR_MAX == 0xFFFFFFFFFFFFFFFFULL
     if (ESTACK_UNLIKELY(meta_type == 3)) {
-        ((uint64_t *)(void *)end_of_stack_header)[index] = (uint64_t)value;
+        uint64_t val64 = (uint64_t)value;
+        memcpy((void *)(end_of_stack_header + index * sizeof(uint64_t)), &val64, sizeof(uint64_t));
         return;
     }
 #endif
