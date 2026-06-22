@@ -281,7 +281,7 @@ jobs:
         run: |
           avr-gcc -mmcu=atmega328p ${{ matrix.opt }} -Wall -Wextra -Werror \
             -Wshadow -Wconversion -Wsign-conversion -Wcast-align \
-            -DESTACK_NO_MALLOC -DEASY_STACK_IMPLEMENTATION \
+            -DESTACK_NO_MALLOC -DESTACK_NO_AUTO_ALIGN -DEASY_STACK_IMPLEMENTATION \
             -x c -c easy_stack.h -o easy_stack.o
       - name: verify-binary-size
         run: avr-size easy_stack.o
