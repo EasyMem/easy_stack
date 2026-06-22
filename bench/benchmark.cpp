@@ -7,6 +7,17 @@
 #include <algorithm>
 #include <cstring> // Added for std::memset
 
+// Define default depth if not passed via compiler options (e.g., -DBENCH_DEPTH=30)
+#ifndef BENCH_DEPTH
+    #define BENCH_DEPTH 15
+#endif
+
+// Compile-time scaling of benchmark execution limits
+constexpr int DEPTH_MAX = BENCH_DEPTH;
+constexpr int DEPTH_P1  = (DEPTH_MAX * 8) / 15;
+constexpr int DEPTH_P2  = (DEPTH_MAX * 5) / 15;
+constexpr double OPS_PER_ITERATION = 2.0 * (DEPTH_P1 - DEPTH_P2 + DEPTH_MAX);
+
 // Compiler barrier configuration to avoid optimization folds (call elimination)
 #if defined(__GNUC__) || defined(__clang__)
     #define COMPILER_BARRIER() asm volatile("" : : : "memory")
@@ -122,12 +133,12 @@ int main() {
             // Fresh initialization per round to isolate state
             EStack* stack = estack_create_static(backing_easy, STACK_SIZE);
             uint32_t r_idx = 0;
-            void* ptrs[15] = { nullptr };
+            void* ptrs[DEPTH_MAX] = { nullptr };
 
             auto start = std::chrono::high_resolution_clock::now();
             for (int i = 0; i < pattern_iterations; i++) {
-                // Phase 1: Allocate 8 blocks (Depth 0 -> 8)
-                for (int j = 0; j < 8; j++) {
+                // Phase 1: Allocate blocks (Depth 0 -> DEPTH_P1)
+                for (int j = 0; j < DEPTH_P1; j++) {
                     size_t sz = 16 + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] % 64);
                     ptrs[j] = estack_alloc(stack, sz);
                     if (!ptrs[j]) {
@@ -138,15 +149,15 @@ int main() {
                     COMPILER_BARRIER();
                 }
 
-                // Phase 2: Pop last 3 blocks (Depth 8 -> 5)
-                for (int j = 7; j >= 5; j--) {
+                // Phase 2: Pop last blocks (Depth DEPTH_P1 -> DEPTH_P2)
+                for (int j = DEPTH_P1 - 1; j >= DEPTH_P2; j--) {
                     estack_free(stack, ptrs[j]);
                     COMPILER_BARRIER();
                     ptrs[j] = nullptr;
                 }
 
-                // Phase 3: Allocate 10 more blocks (Depth 5 -> 15)
-                for (int j = 5; j < 15; j++) {
+                // Phase 3: Allocate more blocks (Depth DEPTH_P2 -> DEPTH_MAX)
+                for (int j = DEPTH_P2; j < DEPTH_MAX; j++) {
                     size_t sz = 32 + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] % 128);
                     ptrs[j] = estack_alloc(stack, sz);
                     if (!ptrs[j]) {
@@ -157,8 +168,8 @@ int main() {
                     COMPILER_BARRIER();
                 }
 
-                // Phase 4: Free all remaining blocks (Depth 15 -> 0)
-                for (int j = 14; j >= 0; j--) {
+                // Phase 4: Free all remaining blocks (Depth DEPTH_MAX -> 0)
+                for (int j = DEPTH_MAX - 1; j >= 0; j--) {
                     estack_free(stack, ptrs[j]);
                     COMPILER_BARRIER();
                     ptrs[j] = nullptr;
@@ -174,12 +185,12 @@ int main() {
             wb_MemoryArena wb_stack;
             wb_arenaFixedSizeInit(&wb_stack, backing_wb, STACK_SIZE, wb_Arena_Stack);
             uint32_t r_idx = 0;
-            void* ptrs[15] = { nullptr };
+            void* ptrs[DEPTH_MAX] = { nullptr };
 
             auto start = std::chrono::high_resolution_clock::now();
             for (int i = 0; i < pattern_iterations; i++) {
-                // Phase 1: Allocate 8 blocks (Depth 0 -> 8)
-                for (int j = 0; j < 8; j++) {
+                // Phase 1: Allocate blocks (Depth 0 -> DEPTH_P1)
+                for (int j = 0; j < DEPTH_P1; j++) {
                     size_t sz = 16 + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] % 64);
                     ptrs[j] = wb_arenaPush(&wb_stack, sz);
                     if (!ptrs[j]) {
@@ -190,15 +201,15 @@ int main() {
                     COMPILER_BARRIER();
                 }
 
-                // Phase 2: Pop last 3 blocks (Depth 8 -> 5)
-                for (int j = 7; j >= 5; j--) {
+                // Phase 2: Pop last blocks (Depth DEPTH_P1 -> DEPTH_P2)
+                for (int j = DEPTH_P1 - 1; j >= DEPTH_P2; j--) {
                     wb_arenaPop(&wb_stack);
                     COMPILER_BARRIER();
                     ptrs[j] = nullptr;
                 }
 
-                // Phase 3: Allocate 10 more blocks (Depth 5 -> 15)
-                for (int j = 5; j < 15; j++) {
+                // Phase 3: Allocate more blocks (Depth DEPTH_P2 -> DEPTH_MAX)
+                for (int j = DEPTH_P2; j < DEPTH_MAX; j++) {
                     size_t sz = 32 + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] % 128);
                     ptrs[j] = wb_arenaPush(&wb_stack, sz);
                     if (!ptrs[j]) {
@@ -209,8 +220,8 @@ int main() {
                     COMPILER_BARRIER();
                 }
 
-                // Phase 4: Free all remaining blocks (Depth 15 -> 0)
-                for (int j = 14; j >= 0; j--) {
+                // Phase 4: Free all remaining blocks (Depth DEPTH_MAX -> 0)
+                for (int j = DEPTH_MAX - 1; j >= 0; j--) {
                     wb_arenaPop(&wb_stack);
                     COMPILER_BARRIER();
                     ptrs[j] = nullptr;
@@ -225,12 +236,12 @@ int main() {
             StackAllocator trebi_stack(STACK_SIZE);
             trebi_stack.Init(); 
             uint32_t r_idx = 0;
-            void* ptrs[15] = { nullptr };
+            void* ptrs[DEPTH_MAX] = { nullptr };
 
             auto start = std::chrono::high_resolution_clock::now();
             for (int i = 0; i < pattern_iterations; i++) {
-                // Phase 1: Allocate 8 blocks (Depth 0 -> 8)
-                for (int j = 0; j < 8; j++) {
+                // Phase 1: Allocate blocks (Depth 0 -> DEPTH_P1)
+                for (int j = 0; j < DEPTH_P1; j++) {
                     size_t sz = 16 + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] % 64);
                     ptrs[j] = trebi_stack.Allocate(sz, 8);
                     if (!ptrs[j]) {
@@ -241,15 +252,15 @@ int main() {
                     COMPILER_BARRIER();
                 }
 
-                // Phase 2: Pop last 3 blocks (Depth 8 -> 5)
-                for (int j = 7; j >= 5; j--) {
+                // Phase 2: Pop last blocks (Depth DEPTH_P1 -> DEPTH_P2)
+                for (int j = DEPTH_P1 - 1; j >= DEPTH_P2; j--) {
                     trebi_stack.Free(ptrs[j]);
                     COMPILER_BARRIER();
                     ptrs[j] = nullptr;
                 }
 
-                // Phase 3: Allocate 10 more blocks (Depth 5 -> 15)
-                for (int j = 5; j < 15; j++) {
+                // Phase 3: Allocate more blocks (Depth DEPTH_P2 -> DEPTH_MAX)
+                for (int j = DEPTH_P2; j < DEPTH_MAX; j++) {
                     size_t sz = 32 + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] % 128);
                     ptrs[j] = trebi_stack.Allocate(sz, 8);
                     if (!ptrs[j]) {
@@ -260,8 +271,8 @@ int main() {
                     COMPILER_BARRIER();
                 }
 
-                // Phase 4: Free all remaining blocks (Depth 15 -> 0)
-                for (int j = 14; j >= 0; j--) {
+                // Phase 4: Free all remaining blocks (Depth DEPTH_MAX -> 0)
+                for (int j = DEPTH_MAX - 1; j >= 0; j--) {
                     trebi_stack.Free(ptrs[j]);
                     COMPILER_BARRIER();
                     ptrs[j] = nullptr;
@@ -277,10 +288,10 @@ int main() {
     double best_wb = get_min_time(times_wb);
     double best_trebi = get_min_time(times_trebi);
 
-    // Calculation of allocator throughput (each iteration does exactly 36 allocator calls)
-    const double total_ops_per_round = (double)pattern_iterations * 36.0;
+    // Calculation of allocator throughput dynamically scaled based on compiled depth
+    const double total_ops_per_round = (double)pattern_iterations * OPS_PER_ITERATION;
 
-    std::cout << "=== Results (Best of " << ROUNDS << " runs, " << pattern_iterations << " iterations/run) ===\n";
+    std::cout << "=== Results (Best of " << ROUNDS << " runs, " << pattern_iterations << " iterations/run, depth " << DEPTH_MAX << ") ===\n";
     std::printf("EasyStack:         %.4f sec (%.2f million ops/sec)\n", 
            best_easy, total_ops_per_round / best_easy / 1e6);
            

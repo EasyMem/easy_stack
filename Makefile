@@ -69,11 +69,12 @@ FUZZ_FLAGS = -fsanitize=fuzzer,address,undefined -O3 -g3 -fno-omit-frame-pointer
 FUZZ_DEBUG_FLAGS = -fsanitize=fuzzer,address,undefined -O0 -g3 -fno-omit-frame-pointer -DESTACK_FUZZ_DEBUG -DDEBUG
 
 # --- Benchmark Configuration ---
+DEPTH ?= 15
 BENCH_DIR = bench
 BENCH_SRCS = $(BENCH_DIR)/benchmark.cpp $(BENCH_DIR)/Allocator.cpp $(BENCH_DIR)/StackAllocator.cpp
-BENCH_BIN = $(BENCH_DIR)/benchmark
+BENCH_BIN = $(BENCH_DIR)/benchmark_$(DEPTH)
 CXX ?= g++
-CXXFLAGS = -O3 -std=c++17 -flto -DNDEBUG -Wno-stringop-overflow -I. -I$(BENCH_DIR)
+CXXFLAGS = -O3 -std=c++17 -flto -DNDEBUG -Wno-stringop-overflow -DBENCH_DEPTH=$(DEPTH) -I. -I$(BENCH_DIR)
 
 # Define the primary source file to check coverage for.
 COVERAGE_SRC = easy_stack.h
@@ -278,11 +279,11 @@ clean_matrix:
 
 # --- Benchmark Target ---
 $(BENCH_BIN): $(BENCH_SRCS) easy_stack.h
-	@printf "Compiling benchmark suite: $@\n"
+	@printf "Compiling benchmark suite (depth $(DEPTH)): $@\n"
 	@$(CXX) $(CXXFLAGS) $(BENCH_SRCS) -o $@
 
 bench: $(BENCH_BIN)
-	@printf "\n--- Running Stack Allocator Benchmarks ---\n"
+	@printf "\n--- Running Stack Allocator Benchmarks (Depth: $(DEPTH)) ---\n"
 	@./$(BENCH_BIN)
 
 
@@ -295,7 +296,7 @@ clean:
 	rm -f coverage.info
 	rm -f $(FUZZ_BINS) $(FUZZ_DEBUG_BINS)
 	rm -rf $(MATRIX_DIR)
-	rm -f $(BENCH_BIN) # Clean benchmark binary
+	rm -f $(BENCH_DIR)/benchmark_* # Clean all benchmark binaries
 
 
 # --- Fuzzing Targets ---
@@ -330,7 +331,7 @@ list:
 	@printf "  make tests                    - run all tests without debug output \n"
 	@printf "  make tests_full               - run all tests with debug output\n"
 	@printf "  make test_matrix -j$(nproc)   - run matrix of tests\n"
-	@printf "  make bench                    - compile and run stupidly fast allocator benchmarks\n"
+	@printf "  make bench [DEPTH=15|30|100]  - compile and run benchmarks with customizable stack depth (default: 15)\n"
 	@printf "  make coverage                 - build & run tests to generate coverage data for CodeCov\n"
 	@printf "  make fuzz_[name]              - run the 'core' fuzzer for 5 minutes (auto-detects fuzz_*.c)\n"
 	@printf "  make replay_[name] CRASH=...  - replay a specific crash file with ASCII visualization\n"

@@ -68,3 +68,4 @@ fuzzers/*_fuzzer
 .venv
 
 benchmark
+benchmark_*
