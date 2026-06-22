@@ -84,7 +84,7 @@ The library undergoes exhaustive testing to guarantee absolute correctness and r
 *   **Sanitizer Suite:** Continuously verified with **ASan** (Address Sanitizer), **UBSan** (Undefined Behavior Sanitizer), and **LSan** (Leak Sanitizer).
 *   **Valgrind Memcheck:** Fully verified with **0 errors from 0 contexts**.
 *   **Pedantic Compilation:** Enforces "Warnings-as-Errors" (`-Werror`) policy on a comprehensive flag matrix:
-    *   `-Wshadow`, `-Wconversion`, `-Wundef`, `-Wstrict-aliasing=2`, `-Wcast-align`, `-Wpadded`.
+    *   `-Wshadow`, `-Wconversion`, `-Wundef`, `-Wstrict-aliasing=1`, `-Wcast-align`, `-Wpadded`.
     *   `-Wint-to-pointer-cast`, `-Wpointer-to-int-cast`, `-Wdouble-promotion`, `-Wpointer-arith`.
 *   **Platform Coverage:** Verified compatibility across **Linux**, **macOS**, and **Windows (MSVC & MinGW)**.
 
