@@ -367,10 +367,13 @@ ESTACK_STATIC_ASSERT((ESTACK_MAGIC != 0), "ESTACK_MAGIC must be a non-zero value
 /*
  * Configuration: Minimum Alignment Limit
  * 
- * Minimum payload alignment boundary (machine-word size).
- * Defined only if payload alignment is enabled (ESTACK_NO_AUTO_ALIGN is NOT defined).
+ * Minimum payload alignment boundary.
+ * If auto-alignment is disabled, the minimum allowed alignment is 1 byte.
+ * Otherwise, it defaults to the machine-word size.
  */
-#ifndef ESTACK_NO_AUTO_ALIGN
+#ifdef ESTACK_NO_AUTO_ALIGN
+#   define ESTACK_MIN_ALIGNMENT ((size_t)1)
+#else
 #   define ESTACK_MIN_ALIGNMENT ((size_t)sizeof(uintptr_t))
 #endif
 
