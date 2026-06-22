@@ -44,7 +44,7 @@ constexpr double OPS_PER_ITERATION = 2.0 * (DEPTH_P1 - DEPTH_P2 + DEPTH_MAX);
 // Benchmark configuration
 #define ROUNDS 25                    // Increased to 25 to filter out OS scheduler noise
 #define ITERATIONS_PER_ROUND 2000000 // 2M iterations per round (50M operations total per run)
-#define STACK_SIZE (1024 * 64)  
+#define STACK_SIZE (1024 * 1024) // 1 MiB stack size for all allocators
 #define RAND_POOL_SIZE 4096
 
 // Helper to find the minimum duration in a run

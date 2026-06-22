@@ -31,7 +31,7 @@
 
 **What is it?** A portable, extremely fast, single-header stack allocator that completely decouples control paths from aligned user payloads. It eliminates inline metadata overhead entirely by growing tracking offsets forward and aligned payloads backward.
 
-**Why use it?** To achieve deterministic **O(1)** allocation and deallocation speeds that outperform traditional C allocators (like `wb_alloc`) by up to **3.5x+** and compile-time optimized C++ templates (like `trebi`) by up to **4.1x+** in trusted mode (while remaining **2x+ faster** than both even with full runtime defensive safety active), all while retaining up to an **8x smaller metadata footprint**.
+**Why use it?** To achieve deterministic **O(1)** allocation and deallocation speeds that outperform traditional C allocators (like `wb_alloc`) by up to **4.1x+** and compile-time optimized C++ templates (like `Trebi`) by up to **4.7x+** in trusted mode (while remaining **2.5x+ faster** than both even with full runtime defensive safety active), all while retaining up to an **8x smaller metadata footprint**.
 
 **How to use it?** `#define EASY_STACK_IMPLEMENTATION` in one `.c` file, then just `#include "easy_stack.h"`.
 
@@ -137,31 +137,50 @@ To verify execution speed, cache resilience, and scalability under load, `easy_s
 
 Rather than benchmarking only a single shallow depth, the suite tests scaling across three critical architectural boundaries. This highlights how cache layout and processor prefetching impact execution speed as stack depth increases.
 
+#### Phase A: The Standard 64 KB Workload (16-bit Metadata)
+
+With a 64 KB capacity, `easy_stack` configures itself to use ultra-compact **Type 1 (16-bit)** metadata offsets.
+
 <p align="center">
-  <img src=".github/assets/throughput_chart.png" width="700" alt="Throughput Comparison" />
+  <img src=".github/assets/throughput_64kb_chart.png" width="750" alt="Throughput Scaling vs Stack Allocation Depth at 64KB" />
 </p>
 
-#### Architectural Insights from the Results:
+At shallow depths (15 objects), the entire active allocator footprint (header + 30 bytes of metadata) fits completely into a **single 64-byte L1 cache line**. This yields a hardware-limit speed of **939 Million ops/sec** (~1.06 ns per allocation/free cycle) in Contract mode, outperforming the C++ template LIFO allocator by **371%**.
 
-*   **Perfect L1 Residency (Depth 15):** 
-    At shallow depths, the EStack header (16 bytes) and active metadata cells (30 bytes for `uint16_t` offsets) fit entirely within a single **64-byte L1 cache line** ($16 + 30 = 46$ bytes). In **Contract** (Trusted) mode, this achieves near-hardware limits of **821 Million ops/sec** (~1.22 ns per allocation/free cycle) due to 100% L1 cache hits.
-    
-*   **L1 Cache Line Transitions (Depth 30):** 
-    As the stack depth crosses the 64-byte boundary ($16 + 60 = 76$ bytes), metadata spans into a second cache line. This transition introduces a minor **6% throughput degradation** (dropping to **766 Million ops/sec**), representing the hardware overhead of fetching the adjacent cache line.
-    
-*   **Hardware Prefetcher Synergy (Depth 100):** 
-    At extreme depths, metadata spans 4 distinct cache lines (216 bytes total). Thanks to the dense, sequential, and contiguous layout of the metadata array, the CPU's **Hardware Prefetcher** instantly recognizes the linear access pattern. It proactively loads upcoming cache lines into L1, maintaining a blistering speed of **682 Million ops/sec** (only a 17% drop from peak L1 residency).
-    
-*   **Instruction Latency Hiding (Defensive Mode Flatness):** 
-    In **Defensive** (Safety) mode, throughput remains completely flat at a rock-solid **~464 Million ops/sec** across all depths (15, 30, and 100). 
-    
-    This stability is a textbook demonstration of **CPU-bound execution masking memory latency**. The execution of defensive `if` branches and boundary checks occupies the pipeline with ALU instructions. During this instruction execution window, the CPU's prefetcher asynchronously pulls next-cache-line memory requests in the background. By the time the safety checks are complete, the memory is already waiting in L1, resulting in a **zero-cycle memory stall** regardless of stack depth.
+---
 
-#### Comparison to Competitors:
+#### Phase B: The Transparent 1 MB Workload (32-bit Metadata)
 
-Traditional inline-header allocators degrade more severely or remain slow under depth scaling. 
-*   **Trebi (C++)** drops from **199 Million ops/sec** down to **185 Million** at depth 100. This is because inline metadata scatters memory records across the buffer ($100 \times 16 \text{ bytes} = 1600 \text{ bytes}$ of headers mixed with payload). This layout thrashes L1 cache lines with hard-to-predict address jumps, causing frequent processor stalls. 
-*   Even with full safety checks active, **EasyStack (Defensive)** remains **87% faster than wb_alloc** and **150% faster than Trebi** at depth 100, while **EasyStack (Contract)** outperforms competitors by up to **268%**.
+> *"Wait a minute! You're cheating! By using a tiny 64 KB buffer, you guarantee that all metadata easily fits inside L1 cache. Let's see what happens on a larger stack."*
+
+The objection is logically sound. To address this, the stack capacity was scaled up.
+
+In **Defensive** and **Contract** modes, the capacity was increased to **1 MB**, automatically triggering the transition to 4-byte metadata offsets (`meta_type = 2`).
+
+```bash
+# Run benchmark with custom depth
+make bench DEPTH=30
+make bench DEPTH=100
+```
+
+This ensures that at depth 100, the metadata array alone spans multiple cache lines, removing any artificial L1 prefetching advantages. Here is how the allocator scales under the heavier 32-bit math path:
+
+<p align="center">
+  <img src=".github/assets/throughput_1mb_chart.png" width="750" alt="Throughput Scaling vs Stack Allocation Depth at 1MB" />
+</p>
+
+#### Key Takeaways:
+
+*   **Zero-Overhead Metadata Scaling:** 
+    Comparing the 64 KB buffer (16-bit) vs the 1 MB buffer (32-bit), the throughput drop in Contract mode is **less than 0.5%** at depth 15 (**934 Million ops/sec** vs 939 Million) and only **2.7%** at depth 100 (**717 Million** vs 738 Million). This demonstrates that dynamically widening metadata cells has a negligible performance impact on modern superscalar architectures.
+    
+*   **Instruction Latency Hiding (Defensive Mode Stability):** 
+    In Defensive (Safety) mode, throughput remains completely flat at a rock-solid **~520-550 Million ops/sec** across both 64 KB and 1 MB buffers, regardless of stack allocation depth. 
+    
+    The execution of defensive `if` branches and bounds checks occupies the ALU instruction pipeline. During this execution window, the CPU's prefetcher asynchronously loads upcoming metadata cache lines in the background. By the time safety checks are evaluated, the memory is already waiting in L1, resulting in a **zero-cycle memory stall**.
+    
+*   **Absolute Dominance:** 
+    Even under full runtime safety checks and larger capacities, **EasyStack remains up to 191% faster than Trebi (C++) and 153% faster than wb_alloc (C)**.
 
 
 ### 2. Memory Efficiency (Payload vs. Overhead)
@@ -357,6 +376,7 @@ Helps detect use-after-free and uninitialized memory usage.
 | `ESTACK_NO_AUTO_ALIGN` | *None* | Completely disables user payload alignment (forces 1-byte boundary). Highly recommended for 8/16-bit MCUs to save memory. |
 | `ESTACK_NO_ALIGN_HEADER` | *None* | Completely disables context header alignment (forces 1-byte boundary). Automatically enabled on 8/16-bit systems to eliminate padding waste. |
 | `ESTACK_DEFAULT_HEADER_ALIGNMENT` | *Auto* | Override the optimal context header alignment boundary (defaults to 64-byte for 64-bit, 32-byte for 32-bit platforms to prevent L1 cache line splits). |
+| `ESTACK_NO_BRANCH_HINTS` | *None* | Completely disables compiler branch prediction hints (`ESTACK_LIKELY` and `ESTACK_UNLIKELY`). |
 | `ESTACK_MAGIC` | `0xDEADBEEF..` | Magic number used for Stack Marker cryptographic XOR-encryption. |
 
 ---

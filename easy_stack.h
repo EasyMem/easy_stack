@@ -74,6 +74,7 @@
  *    #define ESTACK_STATIC            // Make all functions static (Private linkage)
  *    #define ESTACK_RESTRICT          // Manual override for 'restrict' keyword definition
  *    #define ESTACK_NO_ATTRIBUTES     // Disable all compiler-specific attributes
+ *    #define ESTACK_NO_BRANCH_HINTS   // Disable compiler branch prediction hints
  *
  *  TUNING:
  *    #define ESTACK_MAGIC             <value>  // Custom magic number for stack validation
@@ -313,6 +314,20 @@ ESTACK_STATIC_ASSERT(ESTACK_INTERNAL_CHAR_BIT == 8, "EStack requires 8-bit byte 
 #   define ESTACK_ATTR_MALLOC
 #   define ESTACK_ATTR_WARN_UNUSED
 #   define ESTACK_ATTR_ALLOC_SIZE(idx, name)
+#endif
+
+/*
+ * Configuration: Branch Prediction Hints
+ * 
+ * Uses compiler builtins to guide the branch predictor for hot paths.
+ * Can be completely disabled by defining ESTACK_NO_BRANCH_HINTS before including this header.
+ */
+#if !defined(ESTACK_NO_BRANCH_HINTS) && (defined(__GNUC__) || defined(__clang__))
+#   define ESTACK_LIKELY(x)   __builtin_expect(!!(x), 1)
+#   define ESTACK_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#else
+#   define ESTACK_LIKELY(x)   (x)
+#   define ESTACK_UNLIKELY(x) (x)
 #endif
 
 /*
@@ -750,73 +765,80 @@ static inline size_t estack_calculate_meta_type(size_t capacity) {
 /*
  * Fetch a metadata value (relative payload offset) from the metadata array.
  * Dynamically scales and casts offsets based on the stack's configured meta_type.
+ * Optimized with branch prediction hints for the most common capacities.
  */
 static inline size_t estack_read_meta(const EStack *stack, size_t meta_type, size_t index) {
     uintptr_t end_of_stack_header = (uintptr_t)stack + sizeof(EStack);
-    uint8_t *meta8 = (uint8_t *)(void *)end_of_stack_header;
-    uint16_t *meta16 = (uint16_t *)(void *)end_of_stack_header;
-    #if UINTPTR_MAX >= 0xFFFFFFFFUL
-    uint32_t *meta32 = (uint32_t *)(void *)end_of_stack_header;
-    #endif
-    #if UINTPTR_MAX == 0xFFFFFFFFFFFFFFFFULL
-    uint64_t *meta64 = (uint64_t *)(void *)end_of_stack_header;
-    #endif
 
-    switch (meta_type) {
-        case 0:  return meta8[index];
-        case 1:  return meta16[index];
-        #if UINTPTR_MAX >= 0xFFFFFFFFUL
-        case 2:  return meta32[index];
-        #endif
-        #if UINTPTR_MAX == 0xFFFFFFFFFFFFFFFFULL
-        case 3:  return meta64[index];
-        #endif
-        // LCOV_EXCL_START
-        default:
-            ESTACK_ASSERT(false && "Invalid meta type in stack allocator");
-            return 0;
-        // LCOV_EXCL_STOP
+    // Case 1 (< 64 KB): Highly likely scenario for thread-local/scratchpad workloads
+    if (ESTACK_LIKELY(meta_type == 1)) {
+        return ((uint16_t *)(void *)end_of_stack_header)[index];
     }
+    
+    // Case 2 (< 4 GB): Highly likely scenario for large desktop/game-engine stacks
+#if UINTPTR_MAX >= 0xFFFFFFFFUL
+    if (ESTACK_LIKELY(meta_type == 2)) {
+        return ((uint32_t *)(void *)end_of_stack_header)[index];
+    }
+#endif
+
+    // Case 0 (< 256 B): Micro-allocations or small static buffers
+    if (meta_type == 0) {
+        return ((uint8_t *)(void *)end_of_stack_header)[index];
+    }
+
+    // Case 3 (>= 4 GB): Highly unlikely for standard stack allocators
+#if UINTPTR_MAX == 0xFFFFFFFFFFFFFFFFULL
+    if (ESTACK_UNLIKELY(meta_type == 3)) {
+        return ((uint64_t *)(void *)end_of_stack_header)[index];
+    }
+#endif
+
+    // LCOV_EXCL_START
+    ESTACK_ASSERT(false && "Invalid meta type in stack allocator");
+    return 0;
+    // LCOV_EXCL_STOP
 }
 
 /*
  * Store a metadata value (relative payload offset) into the metadata array.
  * Dynamically scales and casts writes based on the stack's configured meta_type.
+ * Optimized with branch prediction hints for the most common capacities.
  */
 static inline void estack_write_meta(EStack *stack, size_t meta_type, size_t index, size_t value) {
     uintptr_t end_of_stack_header = (uintptr_t)stack + sizeof(EStack);
-    uint8_t *meta8 = (uint8_t *)(void *)end_of_stack_header;
-    uint16_t *meta16 = (uint16_t *)(void *)end_of_stack_header;
-    #if UINTPTR_MAX >= 0xFFFFFFFFUL
-    uint32_t *meta32 = (uint32_t *)(void *)end_of_stack_header;
-    #endif
-    #if UINTPTR_MAX == 0xFFFFFFFFFFFFFFFFULL
-    uint64_t *meta64 = (uint64_t *)(void *)end_of_stack_header;
-    #endif
 
-    switch (meta_type) {
-        case 0:
-            meta8[index] = (uint8_t)value;
-            break;
-        case 1:
-            meta16[index] = (uint16_t)value;
-            break;
-        #if UINTPTR_MAX >= 0xFFFFFFFFUL
-        case 2:
-            meta32[index] = (uint32_t)value;
-            break;
-        #endif
-        #if UINTPTR_MAX == 0xFFFFFFFFFFFFFFFFULL
-        case 3:
-            meta64[index] = (uint64_t)value;
-            break;
-        #endif
-        // LCOV_EXCL_START
-        default:
-            ESTACK_ASSERT(false && "Invalid meta type in stack allocator");
-            break;
-        // LCOV_EXCL_STOP
+    // Case 1 (< 64 KB): Highly likely scenario for thread-local/scratchpad workloads
+    if (ESTACK_LIKELY(meta_type == 1)) {
+        ((uint16_t *)(void *)end_of_stack_header)[index] = (uint16_t)value;
+        return;
     }
+    
+    // Case 2 (< 4 GB): Highly likely scenario for large desktop/game-engine stacks
+#if UINTPTR_MAX >= 0xFFFFFFFFUL
+    if (ESTACK_LIKELY(meta_type == 2)) {
+        ((uint32_t *)(void *)end_of_stack_header)[index] = (uint32_t)value;
+        return;
+    }
+#endif
+
+    // Case 0 (< 256 B): Micro-allocations or small static buffers
+    if (meta_type == 0) {
+        ((uint8_t *)(void *)end_of_stack_header)[index] = (uint8_t)value;
+        return;
+    }
+
+    // Case 3 (>= 4 GB): Highly unlikely for standard stack allocators
+#if UINTPTR_MAX == 0xFFFFFFFFFFFFFFFFULL
+    if (ESTACK_UNLIKELY(meta_type == 3)) {
+        ((uint64_t *)(void *)end_of_stack_header)[index] = (uint64_t)value;
+        return;
+    }
+#endif
+
+    // LCOV_EXCL_START
+    ESTACK_ASSERT(false && "Invalid meta type in stack allocator");
+    // LCOV_EXCL_STOP
 }
 
 
