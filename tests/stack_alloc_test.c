@@ -18,10 +18,23 @@ static void test_stack_lifecycle_normal(void) {
     ASSERT(estack_get_meta_index(stack) == 0, "Initial metadata index should be 0");
     ASSERT(estack_get_meta_type(stack) == 0, "Metadata type should be 0 (uint8_t) for small capacity");
     
+#ifdef DEBUG
+    estack_print(stack);
+#endif
+
     // Allocate and free to cover case 0 (uint8_t offsets)
     void *p0 = estack_alloc(stack, 16);
     ASSERT(p0 != NULL, "Allocation should succeed");
+
+#ifdef DEBUG
+    estack_print(stack);
+#endif
+
     estack_free(stack, p0);
+
+#ifdef DEBUG
+    estack_print(stack);
+#endif
 
     estack_destroy(stack);
 
@@ -31,10 +44,23 @@ static void test_stack_lifecycle_normal(void) {
     ASSERT(medium_stack != NULL, "Medium stack pointer should not be NULL");
     ASSERT(estack_get_meta_type(medium_stack) == 1, "Metadata type should be 1 (uint16_t) for medium capacity");
     
+#ifdef DEBUG
+    estack_print(medium_stack);
+#endif
+
     // Allocate and free to cover case 1 (uint16_t offsets)
     void *p1 = estack_alloc(medium_stack, 16);
     ASSERT(p1 != NULL, "Allocation should succeed");
+
+#ifdef DEBUG
+    estack_print(medium_stack);
+#endif
+
     estack_free(medium_stack, p1);
+
+#ifdef DEBUG
+    estack_print(medium_stack);
+#endif
 
     estack_destroy(medium_stack);
 
@@ -44,10 +70,23 @@ static void test_stack_lifecycle_normal(void) {
     ASSERT(large_stack != NULL, "Large stack pointer should not be NULL");
     ASSERT(estack_get_meta_type(large_stack) == 2, "Metadata type should be 2 (uint32_t) for large capacity");
     
+#ifdef DEBUG
+    estack_print(large_stack);
+#endif
+
     // Allocate and free to cover case 2 (uint32_t offsets)
     void *p2 = estack_alloc(large_stack, 16);
     ASSERT(p2 != NULL, "Allocation should succeed");
+
+#ifdef DEBUG
+    estack_print(large_stack);
+#endif
+
     estack_free(large_stack, p2);
+
+#ifdef DEBUG
+    estack_print(large_stack);
+#endif
 
     estack_destroy(large_stack);
 
@@ -58,9 +97,22 @@ static void test_stack_lifecycle_normal(void) {
     EStack *fake_stack = estack_create(128);
     estack_set_meta_type(fake_stack, 3); // Force type 3
     
+#ifdef DEBUG
+    estack_print(fake_stack);
+#endif
+
     void *p3 = estack_alloc(fake_stack, 16);
     ASSERT(p3 != NULL, "Allocation with faked meta type should succeed");
+
+#ifdef DEBUG
+    estack_print(fake_stack);
+#endif
+
     estack_free(fake_stack, p3);
+
+#ifdef DEBUG
+    estack_print(fake_stack);
+#endif
     
     estack_destroy(fake_stack);
 #endif
@@ -80,9 +132,22 @@ static void test_stack_lifecycle_normal(void) {
     ASSERT(static_stack != NULL, "Static Stack should not be NULL");
     ASSERT(estack_get_is_dynamic(static_stack) == false, "Static stack should not be flagged as dynamic");
     
+#ifdef DEBUG
+    estack_print(static_stack);
+#endif
+
     void *p_static = estack_alloc(static_stack, 32);
     ASSERT(p_static != NULL, "Allocation on static stack should succeed");
+
+#ifdef DEBUG
+    estack_print(static_stack);
+#endif
+
     estack_free(static_stack, p_static);
+
+#ifdef DEBUG
+    estack_print(static_stack);
+#endif
 
     estack_destroy(static_stack); // Safe no-op, does not call free() on static_buffer
 }
@@ -133,6 +198,9 @@ static void test_stack_operations_normal(void) {
         
         ASSERT_QUIET(((uintptr_t)p % ESTACK_MIN_ALIGNMENT) == 0, "Payload must be word-aligned");
         fill_memory_pattern(p, 64, (int)count);
+#ifdef DEBUG
+        estack_print(stack);
+#endif
     }
 
     // Since metadata grows from start and payloads grow backward from the end,
@@ -152,6 +220,9 @@ static void test_stack_operations_normal(void) {
         size_t prev_index = estack_get_meta_index(stack);
         estack_free(stack, ptrs[i]);
         ASSERT_QUIET(estack_get_meta_index(stack) == prev_index - 1, "Meta index must decrement after free");
+#ifdef DEBUG
+        estack_print(stack);
+#endif
         
 #ifdef ESTACK_POISONING
         // Check if the memory was poisoned upon deallocation
@@ -162,6 +233,9 @@ static void test_stack_operations_normal(void) {
 
     // Reset the stack to start aligned allocation tests
     estack_reset(stack);
+#ifdef DEBUG
+    estack_print(stack);
+#endif
 
     TEST_CASE("Custom alignment allocations");
     size_t alignments[] = {16, 32, 64, 128};
@@ -170,10 +244,16 @@ static void test_stack_operations_normal(void) {
         void *p = estack_alloc_aligned(stack, 32, align);
         ASSERT(p != NULL, "Aligned allocation should succeed");
         ASSERT_QUIET(((uintptr_t)p % align) == 0, "Payload must satisfy requested custom alignment");
+#ifdef DEBUG
+        estack_print(stack);
+#endif
     }
 
     // Reset the stack to perform exhaustion test
     estack_reset(stack);
+#ifdef DEBUG
+    estack_print(stack);
+#endif
 
     TEST_CASE("Stack exhaustion");
     size_t capacity = estack_get_capacity(stack);
@@ -186,6 +266,9 @@ static void test_stack_operations_normal(void) {
         }
         allocated_total += 32;
         ASSERT_QUIET(allocated_total <= capacity, "Allocated size cannot exceed capacity");
+#ifdef DEBUG
+        estack_print(stack);
+#endif
     }
 
     // Squeeze the remaining bytes with 1-byte allocations until absolutely full.
@@ -196,6 +279,9 @@ static void test_stack_operations_normal(void) {
 
     // Once exhausted, any further allocations must return NULL
     ASSERT(estack_alloc(stack, 1) == NULL, "Stack allocation should return NULL when exhausted");
+#ifdef DEBUG
+    estack_print(stack);
+#endif
 
     estack_destroy(stack);
 }
@@ -261,7 +347,6 @@ static void test_stack_operations_garbage(void) {
 #endif
 }
 
-
 static void test_stack_markers_normal(void) {
     TEST_PHASE("Stack Markers - Normal Path");
 
@@ -269,6 +354,9 @@ static void test_stack_markers_normal(void) {
 
     void *p1 = estack_alloc(stack, 32);
     fill_memory_pattern(p1, 32, 0x11);
+#ifdef DEBUG
+    estack_print(stack);
+#endif
 
     TEST_CASE("Get and rollback to stack markers");
     // Snapshot state after first allocation
@@ -278,16 +366,25 @@ static void test_stack_markers_normal(void) {
     fill_memory_pattern(p2, 32, 0x22);
     void *p3 = estack_alloc(stack, 32);
     fill_memory_pattern(p3, 32, 0x33);
+#ifdef DEBUG
+    estack_print(stack);
+#endif
 
     // Snapshot state after three allocations
     EStackMarker marker2 = estack_get_marker(stack);
 
     void *p4 = estack_alloc(stack, 32);
     fill_memory_pattern(p4, 32, 0x44);
+#ifdef DEBUG
+    estack_print(stack);
+#endif
 
     // Roll back to marker2 (this should release p4)
     estack_free_to_marker(stack, marker2);
     ASSERT(estack_get_meta_index(stack) == 3, "Stack index should revert to 3");
+#ifdef DEBUG
+    estack_print(stack);
+#endif
 
 #ifdef ESTACK_POISONING
     // Ensure the rolled-back region is poisoned
@@ -297,10 +394,16 @@ static void test_stack_markers_normal(void) {
     // Verify we can re-allocate on the freed space
     void *p4_retry = estack_alloc(stack, 32);
     ASSERT(p4_retry == p4, "Re-allocation must reclaim the freed space");
+#ifdef DEBUG
+    estack_print(stack);
+#endif
 
     // Roll back to marker1 (releasing p2, p3, p4_retry)
     estack_free_to_marker(stack, marker1);
     ASSERT(estack_get_meta_index(stack) == 1, "Stack index should revert to 1");
+#ifdef DEBUG
+    estack_print(stack);
+#endif
 
 #ifdef ESTACK_POISONING
     // Verify both released blocks are poisoned

@@ -527,7 +527,6 @@ typedef struct {
  * Diagnostic & Visualization API
  */
 ESTACKDEF void estack_print(const EStack *stack);
-ESTACKDEF void estack_print_fancy(const EStack *stack, size_t bar_size);
 #endif // DEBUG
 
 // --- Stack Creation (Dynamic) ---
@@ -1451,6 +1450,260 @@ ESTACKDEF void estack_destroy(EStack *stack) {
     #define T(str) str
 #endif
 
+#include <stdlib.h>
+
+/* Helper compare function for quick-sorting sizes */
+static int estack_compare_sizes(const void *a, const void *b) {
+    size_t size_a = *(const size_t *)a;
+    size_t size_b = *(const size_t *)b;
+    return (size_a > size_b) - (size_a < size_b);
+}
+
+/*
+ * Print detailed diagnostic statistics of the EStack allocator.
+ * Analyzes the metadata offset array on the fly to compute size metrics.
+ */
+ESTACKDEF void estack_print(const EStack *stack) {
+    if (!stack) {
+        PRINTF(T("EStack: NULL pointer provided.\n\n"));
+        return;
+    }
+
+    size_t capacity = estack_get_capacity(stack);
+    size_t meta_type = estack_get_meta_type(stack);
+    size_t original_meta_index = estack_get_meta_index(stack);
+    bool is_dynamic = estack_get_is_dynamic(stack);
+
+    // Calculate common address bases
+    uintptr_t data_start = (uintptr_t)stack + sizeof(EStack);
+    uintptr_t payload_end = data_start + capacity;
+
+    // Calculate metadata bounds
+    size_t metadata_bytes = original_meta_index << meta_type;
+    uintptr_t meta_end = data_start + metadata_bytes;
+
+    // Calculate payload bounds and reuse the last offset
+    size_t used_payload_bytes = 0;
+    if (original_meta_index > 0) {
+        used_payload_bytes = estack_read_meta(stack, meta_type, original_meta_index - 1);
+    }
+    uintptr_t payload_top = payload_end - used_payload_bytes;
+
+    // Free space is the gap in the middle between metadata array and payload top
+    size_t free_space_bytes = (payload_top >= meta_end) ? (size_t)(payload_top - meta_end) : 0;
+
+    size_t used_bytes = capacity - free_space_bytes;
+    double used_percent = (capacity > 0) ? (((double)used_bytes / (double)capacity) * 100.0) : 0.0;
+
+    size_t total_allocated_span = sizeof(EStack) + capacity;
+    double metadata_ratio_percent = (capacity > 0) ? (((double)metadata_bytes / (double)capacity) * 100.0) : 0.0;
+
+    PRINTF(T("========================================================\n"));
+    PRINTF(T("                 ESTACK DIAGNOSTIC REPORT               \n"));
+    PRINTF(T("========================================================\n"));
+    PRINTF(T("  Stack Address:       %p\n"), (const void *)stack);
+    PRINTF(T("  Allocation Type:     %s\n"), is_dynamic ? T("DYNAMIC (Heap)") : T("STATIC (User Buffer)"));
+    PRINTF(T("  Total Footprint:     %zu bytes\n"), total_allocated_span);
+    PRINTF(T("  Static Header Size:  %zu bytes\n"), sizeof(EStack));
+    PRINTF(T("  Usable Payload Cap:  %zu bytes\n"), capacity);
+    PRINTF(T("  Active Objects:      %zu\n"), original_meta_index);
+    PRINTF(T("--------------------------------------------------------\n"));
+    PRINTF(T("  Used Payload Space:  %zu bytes\n"), used_payload_bytes);
+    PRINTF(T("  Metadata Overhead:   %zu bytes (%s cells)\n"), 
+    metadata_bytes, 
+    (meta_type == 0) ? T("uint8_t") : 
+    (meta_type == 1) ? T("uint16_t") : 
+    (meta_type == 2) ? T("uint32_t") : T("uint64_t"));
+    PRINTF(T("  Total Space Used:    %zu bytes (%.2f%%)\n"), used_bytes, used_percent);
+    PRINTF(T("  Metadata Ratio:      %.2f%%\n"), metadata_ratio_percent);
+    PRINTF(T("  Remaining Free:      %zu bytes\n"), free_space_bytes);
+    PRINTF(T("--------------------------------------------------------\n"));
+
+    if (original_meta_index > 0) {
+        size_t needed_bytes = original_meta_index * sizeof(size_t);
+        size_t *sizes = NULL;
+        bool allocated_on_stack = false;
+
+        /*
+         * TIER 1: Self-Allocation (The Optimal Path)
+         */
+        sizes = (size_t *)estack_alloc((EStack *)(uintptr_t)stack, needed_bytes);
+        if (sizes != NULL) {
+            allocated_on_stack = true;
+        }
+
+        /*
+         * TIER 2: System Heap Fallback
+         */
+        #ifndef ESTACK_NO_MALLOC
+        if (sizes == NULL) {
+            sizes = (size_t *)malloc(needed_bytes);
+        }
+        #endif
+
+        /*
+         * Fast O(N log N) Processing (Tiers 1 & 2)
+         */
+        if (sizes != NULL) {
+            size_t total_user_sizes = 0;
+
+            // Define macro helper to unroll size collection based on meta_type pointer casting
+            #define COLLECT_SIZES(type) do { \
+                const type *meta = (const type *)data_start; \
+                size_t prev_meta = 0; \
+                for (size_t j = 0; j < original_meta_index; j++) { \
+                    size_t curr_meta = meta[j]; \
+                    sizes[j] = curr_meta - prev_meta; \
+                    prev_meta = curr_meta; \
+                    total_user_sizes += sizes[j]; \
+                } \
+            } while (0)
+
+            // Specialized loop resolution without branch evaluation inside the loop
+            switch (meta_type) {
+                case 0:
+                    COLLECT_SIZES(uint8_t);
+                    break;
+                case 1:
+                    COLLECT_SIZES(uint16_t);
+                    break;
+                #if UINTPTR_MAX >= 0xFFFFFFFFUL
+                case 2:
+                    COLLECT_SIZES(uint32_t);
+                    break;
+                #endif
+                #if UINTPTR_MAX == 0xFFFFFFFFFFFFFFFFULL
+                case 3:
+                    COLLECT_SIZES(uint64_t);
+                    break;
+                #endif
+                default:
+                    ESTACK_ASSERT(false && "Invalid meta type");
+                    break;
+            }
+            #undef COLLECT_SIZES
+
+            qsort(sizes, original_meta_index, sizeof(size_t), estack_compare_sizes);
+
+            size_t min_size = sizes[0];
+            size_t max_size = sizes[original_meta_index - 1];
+            double avg_size = (double)total_user_sizes / (double)original_meta_index;
+
+            // Find the most popular size from the sorted array in O(N)
+            size_t most_popular_size = sizes[0];
+            size_t max_frequency = 1;
+            size_t current_size = sizes[0];
+            size_t current_frequency = 1;
+
+            for (size_t j = 1; j < original_meta_index; j++) {
+                if (sizes[j] == current_size) {
+                    current_frequency++;
+                } else {
+                    if (current_frequency > max_frequency) {
+                        max_frequency = current_frequency;
+                        most_popular_size = current_size;
+                    }
+                    current_size = sizes[j];
+                    current_frequency = 1;
+                }
+            }
+            if (current_frequency > max_frequency) {
+                max_frequency = current_frequency;
+                most_popular_size = current_size;
+            }
+
+            // Cleanup the temporary memory array based on where it was allocated
+            if (allocated_on_stack) {
+                estack_free((EStack *)(uintptr_t)stack, sizes);
+            }
+            #ifndef ESTACK_NO_MALLOC
+            else {
+                free(sizes);
+            }
+            #endif
+
+            PRINTF(T("  Smallest Object:     %zu bytes\n"), min_size);
+            PRINTF(T("  Largest Object:      %zu bytes\n"), max_size);
+            PRINTF(T("  Average Object:      %.2f bytes\n"), avg_size);
+            PRINTF(T("  Most Popular Size:   %zu bytes (Frequency: %zu)\n"), most_popular_size, max_frequency);
+        } 
+        else {
+            /* =================================================================
+             * TIER 3: In-Place Fallback (No-Allocation Path)
+             * Used on bare-metal systems when the stack is full.
+             * Executes in O(N^2) time but requires exactly O(1) auxiliary space.
+             * Optimized to fetch typed metadata directly bypassing switch-cases.
+             * ================================================================= */
+            size_t min_size = SIZE_MAX;
+            size_t max_size = 0;
+            size_t total_user_sizes = 0;
+            
+            size_t most_popular_size = 0;
+            size_t max_frequency = 0;
+
+            #define PROCESS_IN_PLACE(type) do { \
+                const type *meta = (const type *)data_start; \
+                size_t prev_j = 0; \
+                for (size_t j = 0; j < original_meta_index; j++) { \
+                    size_t curr_j = meta[j]; \
+                    size_t size_j = curr_j - prev_j; \
+                    prev_j = curr_j; \
+                    if (size_j < min_size) min_size = size_j; \
+                    if (size_j > max_size) max_size = size_j; \
+                    total_user_sizes += size_j; \
+                    size_t freq = 0; \
+                    size_t prev_k = 0; \
+                    for (size_t k = 0; k < original_meta_index; k++) { \
+                        size_t curr_k = meta[k]; \
+                        size_t size_k = curr_k - prev_k; \
+                        prev_k = curr_k; \
+                        if (size_j == size_k) { \
+                            freq++; \
+                        } \
+                    } \
+                    if (freq > max_frequency) { \
+                        max_frequency = freq; \
+                        most_popular_size = size_j; \
+                    } \
+                } \
+            } while (0)
+
+            // Specialized loop resolution without branch evaluation inside the loops
+            switch (meta_type) {
+                case 0:
+                    PROCESS_IN_PLACE(uint8_t);
+                    break;
+                case 1:
+                    PROCESS_IN_PLACE(uint16_t);
+                    break;
+                #if UINTPTR_MAX >= 0xFFFFFFFFUL
+                case 2:
+                    PROCESS_IN_PLACE(uint32_t);
+                    break;
+                #endif
+                #if UINTPTR_MAX == 0xFFFFFFFFFFFFFFFFULL
+                case 3:
+                    PROCESS_IN_PLACE(uint64_t);
+                    break;
+                #endif
+                default:
+                    ESTACK_ASSERT(false && "Invalid meta type");
+                    break;
+            }
+            #undef PROCESS_IN_PLACE
+
+            double avg_size = (double)total_user_sizes / (double)original_meta_index;
+
+            PRINTF(T("  Smallest Object:     %zu bytes (In-place)\n"), min_size);
+            PRINTF(T("  Largest Object:      %zu bytes (In-place)\n"), max_size);
+            PRINTF(T("  Average Object:      %.2f bytes (In-place)\n"), avg_size);
+            PRINTF(T("  Most Popular Size:   %zu bytes (Frequency: %zu, In-place)\n"), most_popular_size, max_frequency);
+        }
+    } else {
+        PRINTF(T("  Object Statistics:   N/A (Stack is empty)\n"));
+    }
+    PRINTF(T("========================================================\n\n"));
+}
 #endif // DEBUG
 
 #endif // EASY_STACK_IMPLEMENTATION
