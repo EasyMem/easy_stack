@@ -55,7 +55,7 @@ int main(void) {
     avr_assert(estack_get_meta_index(stack) == 0);
     
     cli();                               // Disable all interrupts
-    set_sleep_mode(SLEEP_MODE_PWR_DOWN); // Set deepest sleep mode (Power-Down)
+    set_sleep_mode(uint8_t)SLEEP_MODE_PWR_DOWN); // Set deepest sleep mode (Power-Down)
     sleep_enable();
     sleep_cpu();                         // Put CPU to sleep. simavr will exit cleanly.
     
