@@ -53,7 +53,8 @@ export UBSAN_OPTIONS=halt_on_error=0:exitcode=1:print_stacktrace=1
 export ASAN_OPTIONS=$(ASAN_OPTS)
 
 TEST_DIR = tests
-TEST_SRCS = $(wildcard $(TEST_DIR)/*.c)
+# Collect all tests except the specialized AVR bare-metal simulation
+TEST_SRCS = $(filter-out $(TEST_DIR)/avr_test.c, $(wildcard $(TEST_DIR)/*.c))
 # Generate names for coverage object files
 TEST_COV_OBJS = $(TEST_SRCS:$(TEST_DIR)/%.c=$(TEST_DIR)/%.cov.o)
 # Generate names for coverage executables

@@ -275,13 +275,30 @@ jobs:
         opt: [-O0, -O1, -O2, -O3, -Os]
     steps:
       - uses: actions/checkout@v6
-      - name: install-avr-toolchain
-        run: sudo apt-get update && sudo apt-get install -y gcc-avr avr-libc
-      - name: compile-library-no-malloc
+      
+      - name: install-avr-toolchain-and-simulator
+        run: sudo apt-get update && sudo apt-get install -y gcc-avr avr-libc simavr
+        
+      - name: compile-library-and-print-size
         run: |
+          # Compile the isolated library object file to check standalone footprint
           avr-gcc -mmcu=atmega328p ${{ matrix.opt }} -Wall -Wextra -Werror \
             -Wshadow -Wconversion -Wsign-conversion -Wcast-align \
-            -DESTACK_NO_MALLOC -DESTACK_NO_AUTO_ALIGN -DEASY_STACK_IMPLEMENTATION \
+            -DESTACK_NO_MALLOC -DEASY_STACK_IMPLEMENTATION \
             -x c -c easy_stack.h -o easy_stack.o
-      - name: verify-binary-size
-        run: avr-size easy_stack.o
+            
+          echo "=== Standalone Library Footprint ==="
+          avr-size easy_stack.o
+        
+      - name: compile-and-run-avr-simulation
+        run: |
+          # Compile the standalone AVR test for ATmega328P
+          avr-gcc -mmcu=atmega328p ${{ matrix.opt }} -Wall -Wextra -Werror \
+            -Wshadow -Wconversion -Wsign-conversion -Wcast-align \
+            -I. tests/avr_test.c -o avr_test.elf
+            
+          echo "=== Full Test Binary Footprint ==="
+          avr-size avr_test.elf
+            
+          # Run the test binary inside the simavr emulator
+          simavr -m atmega328p avr_test.elf
