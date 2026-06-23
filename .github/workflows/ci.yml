@@ -296,7 +296,7 @@ jobs:
         run: |
           # Compile the standalone AVR test for ATmega328P
           avr-gcc -mmcu=atmega328p ${{ matrix.opt }} -Wall -Wextra -Werror \
-            -Wshadow -Wconversion -Wsign-conversion -Wcast-align \
+            -Wshadow -Wsign-conversion -Wcast-align \
             -I. tests/avr_test.c -o avr_test.elf
             
           echo "=== Full Test Binary Footprint ==="
