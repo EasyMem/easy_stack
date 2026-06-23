@@ -2,6 +2,8 @@
 #define ESTACK_NO_MALLOC
 #include "easy_stack.h"
 #include <stdlib.h>
+#include <avr/interrupt.h>
+#include <avr/sleep.h>
 
 /*
  * Standalone assertion helper for bare-metal AVR environment.
@@ -51,6 +53,11 @@ int main(void) {
     
     estack_free(stack, t1);
     avr_assert(estack_get_meta_index(stack) == 0);
+    
+    cli();                               // Disable all interrupts
+    set_sleep_mode(SLEEP_MODE_PWR_DOWN); // Set deepest sleep mode (Power-Down)
+    sleep_enable();
+    sleep_cpu();                         // Put CPU to sleep. simavr will exit cleanly.
     
     return 0; // Success
 }
