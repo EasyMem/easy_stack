@@ -44,6 +44,7 @@ int main(void) {
     
     void *t2 = estack_alloc(stack, 16);
     avr_assert(estack_get_meta_index(stack) == 2);
+    (void)t2; // Suppress unused variable warning
     
     estack_free_to_marker(stack, marker);
     avr_assert(estack_get_meta_index(stack) == 1);
