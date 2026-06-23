@@ -1067,11 +1067,11 @@ ESTACKDEF EStack *estack_create(size_t capacity) {
 ESTACKDEF void *estack_alloc_aligned(EStack *ESTACK_RESTRICT stack, size_t size, size_t alignment) {
     ESTACK_CHECK(stack != NULL,                        NULL, "Internal Error: 'estack_alloc_aligned' called on NULL stack");
     ESTACK_CHECK(size > 0,                             NULL, "Internal Error: 'estack_alloc_aligned' called with zero size");
+    ESTACK_CHECK(alignment >= ESTACK_MIN_ALIGNMENT,    NULL, "Internal Error: 'estack_alloc_aligned' called with too small alignment");
     ESTACK_CHECK(((alignment & (alignment - 1)) == 0), NULL, "Internal Error: 'estack_alloc_aligned' called with invalid alignment");
     size_t capacity = estack_get_capacity(stack);
     ESTACK_CHECK((size <= capacity),                   NULL, "Internal Error: 'estack_alloc_aligned' called with size exceeding stack capacity");
     ESTACK_CHECK(alignment <= capacity,                NULL, "Internal Error: 'estack_alloc_aligned' alignment exceeds stack capacity");   
-    ESTACK_CHECK(alignment >= ESTACK_MIN_ALIGNMENT,    NULL, "Internal Error: 'estack_alloc_aligned' called with too small alignment");
 
     /* 
      * WHY DOING THIS? (The Physics of Inverted Bi-Directional Layout)
@@ -1115,22 +1115,22 @@ ESTACKDEF void *estack_alloc_aligned(EStack *ESTACK_RESTRICT stack, size_t size,
     // Physical end of the usable payload buffer
     uintptr_t payload_end = (uintptr_t)stack + sizeof(EStack) + capacity;
     
-    // Calculate candidate raw payload address (growing backward from payload_end)
+    // Calculate candidate raw payload address (safe unsigned underflow wrapping)
     uintptr_t raw_ptr = payload_end - right_offset - size;
     
-    // Apply raw alignment constraints by rounding down
+    // Apply raw alignment constraints by rounding down (safe bitwise wrapping)
     uintptr_t aligned_ptr = align_down(raw_ptr, alignment);
     
-    // Determine current boundary of the metadata offset array (growing forward)
-    uintptr_t meta_end = (uintptr_t)stack + sizeof(EStack) + ((cur_index + 1) << meta_type);
-    
-    // Verify if the metadata array has collided with the payload boundary
-    if (aligned_ptr < meta_end) {
-        return NULL; // Stack Overflow: collision detected
-    }
-
-    // Encode the new payload offset relative to payload_end
+    // Compute the actual backward offset (unsigned overflow cancels out perfectly)
     size_t new_right_offset = payload_end - aligned_ptr;
+    
+    // Determine current boundary of the metadata offset array
+    size_t metadata_overhead = (cur_index + 1) << meta_type;
+    
+    // Collision check: total metadata size + total payload offset must not exceed capacity
+    if (new_right_offset + metadata_overhead > capacity) {
+        return NULL; 
+    }
 
     // Write metadata tracking cell and advance the allocation index
     estack_write_meta(stack, meta_type, cur_index, new_right_offset);
