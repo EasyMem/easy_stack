@@ -14,5 +14,14 @@
   ],
   "license": "MIT",
   "frameworks": "*",
-  "platforms": "*"
+  "platforms": "*",
+  "export": {
+    "include": [
+      "easy_stack.h",
+      "library.json",
+      "library.properties",
+      "LICENSE",
+      "README.md"
+    ]
+  }
 }
