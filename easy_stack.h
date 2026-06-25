@@ -1353,10 +1353,10 @@ ESTACKDEF void estack_free_to_marker(EStack *ESTACK_RESTRICT stack, EStackMarker
 
     uintptr_t decoded_magic = marker.magic ^ stack_addr;
     if (ESTACK_UNLIKELY(decoded_magic != ESTACK_MAGIC)) {
-        ESTACK_ASSERT(false && "Internal Error: 'estack_free_to_marker' detected invalid, corrupted or alien stack marker");
+        ESTACK_CHECK_V(false, "Internal Error: 'estack_free_to_marker' detected invalid, corrupted or alien stack marker");
         return; 
     }
-    
+
     size_t decoded_index = marker.index ^ stack_addr;
     size_t cur_index = estack_get_meta_index(stack);
     ESTACK_CHECK_V((decoded_index <= cur_index), 
