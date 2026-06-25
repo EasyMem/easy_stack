@@ -1354,7 +1354,9 @@ ESTACKDEF void estack_free_to_marker(EStack *ESTACK_RESTRICT stack, EStackMarker
     uintptr_t decoded_magic = marker.magic ^ stack_addr;
     if (ESTACK_UNLIKELY(decoded_magic != ESTACK_MAGIC)) {
         ESTACK_CHECK_V(false, "Internal Error: 'estack_free_to_marker' detected invalid, corrupted or alien stack marker");
-        return; 
+        // LCOV_EXCL_START
+        return;
+        // LCOV_EXCL_STOP
     }
 
     size_t decoded_index = marker.index ^ stack_addr;
