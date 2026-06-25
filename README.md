@@ -420,8 +420,14 @@ This library has been verified to run correctly on embedded hardware without sta
 
 | Architecture | Device | Status |
 | :--- | :--- | :--- |
+| **AVR (8-bit)** | ATmega328P (Nano SuperMini) | ![Status](https://img.shields.io/badge/Verified-success) |
 | **ARM Cortex-M0+** | Raspberry Pi Pico (RP2040) | ![Status](https://img.shields.io/badge/Verified-success) |
-| **Xtensa LX6** | ESP32-WROOM | ![Status](https://img.shields.io/badge/Verified-success) |
+| **ARM Cortex-M3** | BluePill (STM32F103C8) | ![Status](https://img.shields.io/badge/Verified-success) |
+| **ARM Cortex-M4** | BlackPill (STM32F411CE) | ![Status](https://img.shields.io/badge/Verified-success) |
+| **RISC-V (RV32IMC)** | ESP32-C3 (SuperMini) | ![Status](https://img.shields.io/badge/Verified-success) |
+| **Xtensa L106** | ESP8266 (NodeMCU with OLED) | ![Status](https://img.shields.io/badge/Verified-success) |
+| **Xtensa LX6** | ESP-32D (WROOM-32D) | ![Status](https://img.shields.io/badge/Verified-success) |
+| **Xtensa LX7** | ESP32-S3 (DevKitC-1) | ![Status](https://img.shields.io/badge/Verified-success) |
 
 ---
 
