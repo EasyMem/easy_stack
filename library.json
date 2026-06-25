@@ -1,0 +1,18 @@
+{
+  "name": "easy_stack",
+  "version": "1.1.2",
+  "description": "An absurdly fast, header-only, platform-agnostic, and safe LIFO stack allocator utilizing an inverted bi-directional buffer layout with dynamic metadata scaling.",
+  "keywords": "allocator, memory, lifo, stack, embedded, performance, safe",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/easymem/easy_stack.git"
+  },
+  "authors": [
+    {
+      "name": "gooderfreed"
+    }
+  ],
+  "license": "MIT",
+  "frameworks": "*",
+  "platforms": "*"
+}
