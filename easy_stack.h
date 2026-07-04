@@ -46,6 +46,27 @@
  * License: MIT
 */
 
+
+/*
+ * Library version.
+ *
+ * Enables compile-time compatibility checks via preprocessor directives
+ * (e.g., #if ESTACK_VERSION >= 10102).
+ */
+#define ESTACK_STR_HELPER(x) #x
+#define ESTACK_STR(x) ESTACK_STR_HELPER(x)
+
+#define ESTACK_VERSION_MAJOR 1
+#define ESTACK_VERSION_MINOR 2
+#define ESTACK_VERSION_PATCH 0
+
+#define ESTACK_VERSION (ESTACK_VERSION_MAJOR * 10000 + ESTACK_VERSION_MINOR * 100 + ESTACK_VERSION_PATCH)
+
+#define ESTACK_VERSION_STRING ESTACK_STR(ESTACK_VERSION_MAJOR) "." \
+                              ESTACK_STR(ESTACK_VERSION_MINOR) "." \
+                              ESTACK_STR(ESTACK_VERSION_PATCH)
+
+
 /*
  * ============================================================================
  *  CONFIGURATION QUICK REFERENCE
@@ -72,12 +93,14 @@
  *
  *  SYSTEM & LINKAGE:
  *    #define ESTACK_STATIC            // Make all functions static (Private linkage)
+ *    #define ESTACK_NO_MALLOC         // Remove heap-dependent API (estack_create) for bare-metal builds
  *    #define ESTACK_RESTRICT          // Manual override for 'restrict' keyword definition
  *    #define ESTACK_NO_ATTRIBUTES     // Disable all compiler-specific attributes
  *    #define ESTACK_NO_BRANCH_HINTS   // Disable compiler branch prediction hints
  *
  *  TUNING:
  *    #define ESTACK_MAGIC             <value>  // Custom magic number for stack validation
+ *    #define ESTACK_MIN_BUFFER_SIZE   <value>  // Override minimum usable payload capacity
  * ============================================================================
 */
 
@@ -519,10 +542,11 @@ struct EStack {
 /*
  * Stack Allocator Rollback Marker (EStackMarker)
  *
- * A secure, XOR-hardened structure representing the state of a Stack allocator.
- * Both the index and the signature are cryptographically masked with the stack's 
- * base address to prevent cross-allocator marker pollution and memory corruption 
- * during LIFO rollback operations.
+ * An XOR-hardened structure representing the state of a Stack allocator.
+ * Both the index and the signature are masked with the stack's base address
+ * to catch cross-allocator marker pollution and accidental marker corruption.
+ *
+ * Treat markers as strictly scoped to the lifetime of their specific stack instance.
  */
 typedef struct {
     size_t index;     // XOR-encoded allocation index (cur_index ^ stack_address)
@@ -613,6 +637,14 @@ ESTACKDEF void estack_reset_zero(EStack *ESTACK_RESTRICT stack);
  */
 ESTACKDEF void estack_destroy(EStack *stack);
 
+
+// --- State Inspection ---
+/*
+ * Read-only state inspection API.
+ */
+ESTACKDEF size_t estack_capacity(const EStack *stack);
+ESTACKDEF size_t estack_count(const EStack *stack);
+ESTACKDEF size_t estack_free_space(const EStack *stack);
 
 
 #ifdef EASY_STACK_IMPLEMENTATION
@@ -1047,7 +1079,8 @@ ESTACKDEF EStack *estack_create(size_t capacity) {
  *
  * Alignment Requirements:
  *   - Must be a power of two.
- *   - Range: [4..512] bytes (32-bit systems) or [8..1024] bytes (64-bit systems).
+ *   - Range: [ESTACK_MIN_ALIGNMENT .. stack capacity]. The lower bound is the
+ *     machine word size by default, or 1 byte if ESTACK_NO_AUTO_ALIGN is defined.
  *
  * Parameters:
  *   - stack:     Pointer to the active EStack allocator.
@@ -1194,7 +1227,7 @@ ESTACKDEF void *estack_alloc(EStack *ESTACK_RESTRICT stack, size_t size) {
     uintptr_t payload_end = (uintptr_t)stack + sizeof(EStack) + capacity;
     return (void *)(payload_end - new_right_offset);
 }
-#endif 
+#endif
 
 /*
  * Free a memory chunk back to the Stack
@@ -1263,10 +1296,10 @@ ESTACKDEF void estack_free(EStack *ESTACK_RESTRICT stack, void *pointer) {
  * allocation state of the stack.
  *
  * Security / XOR-Hardening:
- *   Both the index and the verification signature are dynamically XOR-encrypted 
- *   using the stack's base memory address and ESTACK_MAGIC. This protects against 
- *   cross-allocator marker pollution (passing Stack A's marker to Stack B) and 
- *   prevents forged marker rollbacks with zero performance overhead.
+ *   Both the index and the verification signature are XOR-masked with the
+ *   stack's base memory address and ESTACK_MAGIC. This catches cross-allocator
+ *   marker pollution (passing Stack A's marker to Stack B) and accidental
+ *   marker corruption with zero performance overhead.
  *
  * Performance:
  *   - O(1) Constant Time.
@@ -1340,15 +1373,15 @@ ESTACKDEF void estack_free_to_marker(EStack *ESTACK_RESTRICT stack, EStackMarker
      * belonging to Stack A into Stack B, causing horrific out-of-bounds memory rollback 
      * or metadata corruption.
      *
-     * 2. THE MATHEMATICS OF XOR ENCRYPTION:
+     * 2. THE MATHEMATICS OF XOR MASKING:
      * To prevent cross-allocator marker pollution with zero runtime overhead, we encode 
      * both the index and a validation signature by XORing them with the stack's base address:
      *   encoded_magic = ESTACK_MAGIC ^ stack_address
      * If the marker is passed to a different stack, decoding it yields:
      *   decoded_magic = encoded_magic ^ alien_stack_address = ESTACK_MAGIC ^ stack_address ^ alien_stack_address
      * Since stack_address != alien_stack_address, the decoded signature never equals ESTACK_MAGIC,
-     * immediately triggering a safe assertion or OOM path. This is a 100% mathematically 
-     * secure protection mechanism compiled into simple 1-cycle bitwise XOR instructions.
+     * immediately triggering a safe assertion or OOM path. This protection compiles into
+     * simple 1-cycle bitwise XOR instructions with zero runtime overhead.
     */
 
     uintptr_t decoded_magic = marker.magic ^ stack_addr;
@@ -1452,7 +1485,11 @@ ESTACKDEF void estack_reset_zero(EStack *ESTACK_RESTRICT stack) {
  * system malloc(), automatically reclaims the allocated heap memory block.
  *
  * Performance:
- *   - O(1) Constant Time.
+ *   - O(1) Constant Time (O(N_Active) if ESTACK_POISONING is enabled).
+ *
+ * Memory Poisoning (Use-After-Destroy Detection):
+ *   - If ESTACK_POISONING is enabled, only the active metadata and payload 
+ *     regions are poisoned with ESTACK_POISON_BYTE.
  *
  * Parameters:
  *   - stack: Pointer to the EStack allocator to be destroyed.
@@ -1468,16 +1505,96 @@ ESTACKDEF void estack_destroy(EStack *stack) {
     ESTACK_CHECK_V((stack != NULL), "Internal Error: 'estack_destroy' called on NULL stack pointer");
 
     #ifndef ESTACK_NO_MALLOC
-    // Check if the stack header has the dynamic allocation flag bit set
-    if (estack_get_is_dynamic(stack)) {
-        // Retrieve the original unaligned pointer stored in the padding slot
+    bool is_dynamic = estack_get_is_dynamic(stack);
+    void *raw_mem = NULL;
+    if (is_dynamic) {
         const char *read_src = (const char *)stack - sizeof(uintptr_t);
         uintptr_t raw_val;
         memcpy(&raw_val, read_src, sizeof(uintptr_t));
-        void *raw_mem = (void *)raw_val;
+        raw_mem = (void *)raw_val;
+    }
+    #endif // ESTACK_NO_MALLOC
+
+    #ifdef ESTACK_POISONING
+    size_t cur_index = estack_get_meta_index(stack);
+    size_t meta_type = estack_get_meta_type(stack);
+    size_t capacity = estack_get_capacity(stack);
+    size_t right_offset = (cur_index == 0) ? 0 : estack_read_meta(stack, meta_type, cur_index - 1);
+    
+    // 1. Poison only the allocated payloads at the high end of the buffer
+    if (right_offset > 0) {
+        uintptr_t payload_end = (uintptr_t)stack + sizeof(EStack) + capacity;
+        memset((void *)(payload_end - right_offset), ESTACK_POISON_BYTE, right_offset);
+    }
+    
+    // 2. Poison only the active metadata array (the header is invalidated below)
+    if (cur_index > 0) {
+        memset((char *)stack + sizeof(EStack), ESTACK_POISON_BYTE, cur_index << meta_type);
+    }
+    #endif
+
+    stack->capacity_and_meta_size = 0;
+    stack->meta_index = 0;
+
+    #ifndef ESTACK_NO_MALLOC
+    if (is_dynamic) {
         free(raw_mem);
     }
     #endif // ESTACK_NO_MALLOC
+}
+
+
+/* ==============================================================================================
+ *  EStack State Inspection API
+ * ==============================================================================================
+ *  Read-only getters for instrumentation, memory budgeting, and debugging.
+*/
+
+/*
+ * Get the total usable payload capacity of the stack in bytes.
+ *
+ * Safety & Behavior:
+ *   - ESTACK_POLICY_CONTRACT: Triggers ESTACK_ASSERT if stack is NULL.
+ *   - ESTACK_POLICY_DEFENSIVE: Safely returns 0 if stack is NULL.
+ */
+ESTACKDEF size_t estack_capacity(const EStack *stack) {
+    ESTACK_CHECK((stack != NULL), 0, "Internal Error: 'estack_capacity' called on NULL stack pointer");
+
+    return estack_get_capacity(stack);
+}
+
+/*
+ * Get the number of currently live (unfreed) allocations.
+ *
+ * Safety & Behavior:
+ *   - Subject to the same Safety Policies as estack_capacity.
+ */
+ESTACKDEF size_t estack_count(const EStack *stack) {
+    ESTACK_CHECK((stack != NULL), 0, "Internal Error: 'estack_count' called on NULL stack pointer");
+
+    return estack_get_meta_index(stack);
+}
+
+/*
+ * Get the raw free gap between the metadata array and the payload region.
+ *
+ * Note: a successful allocation additionally consumes one metadata cell and
+ * possible alignment padding, so an allocation of exactly this size may
+ * still fail. Use this value for budgeting, not as an exact fit guarantee.
+ *
+ * Safety & Behavior:
+ *   - Subject to the same Safety Policies as estack_capacity.
+ */
+ESTACKDEF size_t estack_free_space(const EStack *stack) {
+    ESTACK_CHECK((stack != NULL), 0, "Internal Error: 'estack_free_space' called on NULL stack pointer");
+
+    size_t capacity = estack_get_capacity(stack);
+    size_t cur_index = estack_get_meta_index(stack);
+    size_t meta_type = estack_get_meta_type(stack);
+
+    size_t right_offset = (cur_index == 0) ? 0 : estack_read_meta(stack, meta_type, cur_index - 1);
+
+    return capacity - right_offset - (cur_index << meta_type);
 }
 
 
@@ -1591,12 +1708,15 @@ ESTACKDEF void estack_print(const EStack *stack) {
         if (sizes != NULL) {
             size_t total_user_sizes = 0;
 
-            // Define macro helper to unroll size collection based on meta_type pointer casting
+            // Define macro helper to unroll size collection based on meta_type cell width.
+            // Cells are fetched via memcpy (like estack_read_meta) to stay free of
+            // strict-aliasing and alignment UB regardless of header placement.
             #define COLLECT_SIZES(type) do { \
-                const type *meta = (const type *)data_start; \
                 size_t prev_meta = 0; \
                 for (size_t j = 0; j < original_meta_index; j++) { \
-                    size_t curr_meta = meta[j]; \
+                    type cell; \
+                    memcpy(&cell, (const void *)(data_start + j * sizeof(type)), sizeof(type)); \
+                    size_t curr_meta = cell; \
                     sizes[j] = curr_meta - prev_meta; \
                     prev_meta = curr_meta; \
                     total_user_sizes += sizes[j]; \
@@ -1685,11 +1805,14 @@ ESTACKDEF void estack_print(const EStack *stack) {
             size_t most_popular_size = 0;
             size_t max_frequency = 0;
 
+            // Cells are fetched via memcpy (like estack_read_meta) to stay free of
+            // strict-aliasing and alignment UB regardless of header placement.
             #define PROCESS_IN_PLACE(type) do { \
-                const type *meta = (const type *)data_start; \
                 size_t prev_j = 0; \
                 for (size_t j = 0; j < original_meta_index; j++) { \
-                    size_t curr_j = meta[j]; \
+                    type cell_j; \
+                    memcpy(&cell_j, (const void *)(data_start + j * sizeof(type)), sizeof(type)); \
+                    size_t curr_j = cell_j; \
                     size_t size_j = curr_j - prev_j; \
                     prev_j = curr_j; \
                     if (size_j < min_size) min_size = size_j; \
@@ -1698,7 +1821,9 @@ ESTACKDEF void estack_print(const EStack *stack) {
                     size_t freq = 0; \
                     size_t prev_k = 0; \
                     for (size_t k = 0; k < original_meta_index; k++) { \
-                        size_t curr_k = meta[k]; \
+                        type cell_k; \
+                        memcpy(&cell_k, (const void *)(data_start + k * sizeof(type)), sizeof(type)); \
+                        size_t curr_k = cell_k; \
                         size_t size_k = curr_k - prev_k; \
                         prev_k = curr_k; \
                         if (size_j == size_k) { \

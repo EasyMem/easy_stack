@@ -497,8 +497,113 @@ static void test_stack_resets(void) {
     estack_destroy(stack);
 }
 
+static void test_stack_boundary_edges(void) {
+    TEST_PHASE("Stack Boundaries - Dynamic Edge Case");
+
+    TEST_CASE("Dynamic exact-fit edge boundary");
+    {
+        size_t capacity = 1024;
+        size_t cell = 2;                         // For 1 KB capacity, metadata cell is always uint16_t (2 bytes)
+        size_t alignment = ESTACK_MIN_ALIGNMENT; // 8 bytes on 64-bit systems
+        
+        EStack *stack = estack_create(capacity);
+        ASSERT(stack != NULL, "Boundary stack creation must succeed");
+        
+        // 1. Allocate an initial block of ANY size (e.g. 300 bytes)
+        void *p1 = estack_alloc(stack, 300);
+        ASSERT(p1 != NULL, "First allocation must succeed");
+        
+        // At this point:
+        size_t cur_index = estack_count(stack); // is 1
+        size_t free_space = estack_free_space(stack);
+        
+        // Calculate the current right offset of the stack
+        size_t right_offset = capacity - (cur_index * cell) - free_space;
+        
+        // The next allocation will have index cur_index + 1
+        size_t next_metadata_overhead = (cur_index + 1) * cell;
+        
+        // Calculate the absolute limit of what the allocator can physically 
+        // fit in the remaining space, rounding down to the alignment boundary:
+        size_t max_fit = (capacity - next_metadata_overhead - right_offset) & ~(alignment - 1);
+        
+        // 2. Off-by-one check: allocating max_fit + 1 must fail (OOM)
+        void *p_fail = estack_alloc(stack, max_fit + 1);
+        ASSERT(p_fail == NULL, "Allocation of max_fit + 1 must fail (OOM)");
+        ASSERT(estack_count(stack) == 1, "Failed allocation must not alter stack state");
+        
+        // 3. Exact fit: allocating max_fit must succeed
+        void *p2 = estack_alloc(stack, max_fit);
+        ASSERT(p2 != NULL, "Second exact-fit allocation must succeed");
+        
+        // 4. Any further allocation (even 1 byte) must now fail
+        void *p_extra = estack_alloc(stack, 1);
+        ASSERT(p_extra == NULL, "Any further allocation on a full stack must fail");
+        
+        // Cleanup
+        estack_free(stack, p2);
+        estack_free(stack, p1);
+        estack_destroy(stack);
+    }
+}
+
+static void test_stack_diagnostics(void) {
+    TEST_PHASE("Stack Diagnostics API");
+
+    EStack *stack = estack_create(512);
+    size_t capacity = estack_capacity(stack);
+
+    TEST_CASE("Diagnostics on a fresh stack");
+    ASSERT(capacity == estack_get_capacity(stack), "estack_capacity must match the internal capacity");
+    ASSERT(estack_count(stack) == 0, "Fresh stack must report zero live allocations");
+    ASSERT(estack_free_space(stack) == capacity, "Fresh stack must report the full capacity as free");
+
+    TEST_CASE("Diagnostics after allocations");
+    void *p1 = estack_alloc(stack, 64);
+    ASSERT(estack_count(stack) == 1, "Count must track live allocations");
+    size_t free_after = estack_free_space(stack);
+    ASSERT(free_after < capacity, "Free space must shrink after an allocation");
+    ASSERT(capacity - free_after >= 64 + 1, "Free space must account for both payload and metadata");
+
+    TEST_CASE("Diagnostics after free");
+    estack_free(stack, p1);
+    ASSERT(estack_count(stack) == 0, "Count must decrement after free");
+    ASSERT(estack_free_space(stack) == capacity, "Free space must fully recover after free");
+
+#if ESTACK_SAFETY_POLICY == ESTACK_POLICY_DEFENSIVE
+    TEST_CASE("Diagnostics on NULL stack");
+    ASSERT(estack_capacity(NULL) == 0, "Capacity of NULL stack must be 0");
+    ASSERT(estack_count(NULL) == 0, "Count of NULL stack must be 0");
+    ASSERT(estack_free_space(NULL) == 0, "Free space of NULL stack must be 0");
+#endif
+
+    estack_destroy(stack);
+}
+
+static void test_stack_destroy_invalidation(void) {
+#ifdef ESTACK_POISONING
+    TEST_PHASE("Stack Destroy - Use-After-Destroy Detection");
+
+    TEST_CASE("Destroyed static stack is invalidated");
+    uint8_t buffer[256];
+    EStack *stack = estack_create_static(buffer, sizeof(buffer));
+    void *p = estack_alloc(stack, 32);
+    ASSERT(p != NULL, "Allocation before destroy should succeed");
+
+    estack_destroy(stack);
+    // Verify that the active allocation is poisoned (we don't check the entire capacity
+    // to match our optimized, fast destructor that avoids redundant memsets).
+    ASSERT(verify_memory_pattern(p, 32, ESTACK_POISON_BYTE), "Destroyed active payload must be poisoned");
+    ASSERT(estack_capacity(stack) == 0, "Destroyed stack must report zero capacity");
+
+#if ESTACK_SAFETY_POLICY == ESTACK_POLICY_DEFENSIVE
+    ASSERT(estack_alloc(stack, 1) == NULL, "Allocation on a destroyed stack must fail");
+#endif
+#endif // ESTACK_POISONING
+}
+
 int main(void) {
-    setvbuf(stdout, NULL, _IONBF, 0); 
+    setvbuf(stdout, NULL, _IONBF, 0);
 
     test_stack_lifecycle_normal();
     test_stack_lifecycle_garbage();
@@ -507,7 +612,10 @@ int main(void) {
     test_stack_markers_normal();
     test_stack_markers_garbage();
     test_stack_resets();
-    
+    test_stack_boundary_edges();
+    test_stack_diagnostics();
+    test_stack_destroy_invalidation();
+
     print_test_summary();
     return tests_failed > 0 ? 1 : 0;
 }

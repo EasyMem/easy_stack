@@ -1,7 +1,7 @@
 <table>
   <tr>
     <td width="150" valign="middle">
-      <img src=".github/assets/logo.jpg" width="150" alt="easy_stack logo" />
+      <img src="https://raw.githubusercontent.com/EasyMem/easy_stack/refs/heads/main/.github/assets/logo.jpg" width="150" alt="easy_stack logo" />
     </td>
     <td valign="middle">
       <div id="user-content-toc">
@@ -42,7 +42,7 @@
 *   **Inverted Bi-Directional Layout:** Metadata offsets grow forward from the header (lowest addresses), while aligned user payloads grow backward from the end of the buffer (highest addresses). They meet in the middle. This physical segregation isolates metadata from payload alignment gaps, resulting in **zero alignment padding waste** in the control zone.
 *   **Dynamic Metadata Bit-Width Scaling:** Unlike traditional stack allocators that prefix each allocation with a fixed-size inline header (typically 16 bytes on 64-bit platforms), `easy_stack` dynamically scales metadata cells to 1, 2, 4, or 8 bytes based on overall buffer capacity. For standard frame workloads (< 64 KB), offset cells take only 2 bytes—unlocking up to an **8x reduction in metadata overhead**.
 *   **L1 Cache Line "Free Lunch" Optimization:** The compact `EStack` header requires only 2 machine words (16 bytes on 64-bit systems). By default, on modern desktop and application processors, the library automatically aligns the header boundary to 64-byte or 32-byte cache lines. This guarantees that fetching the stack header into cache automatically and instantly prefetches the **first 24 active metadata offsets** for **free**, bypassing main memory latency entirely.
-*   **XOR-Hardened Stack Markers:** Rollback states (markers) are encrypted by XORing the current allocation index and signature with the stack's base memory address and `ESTACK_MAGIC`. This completely prevents cross-allocator marker pollution (e.g., passing Stack A's marker to Stack B) and detects forged marker rollbacks with **zero mathematical overhead** (1-cycle XOR instructions).
+*   **XOR-Hardened Stack Markers:** Rollback states (markers) are masked by XORing the current allocation index and signature with the stack's base memory address and `ESTACK_MAGIC`. This catches cross-allocator marker pollution (e.g., passing Stack A's marker to Stack B) and accidental marker corruption with **zero runtime overhead** (1-cycle XOR instructions).
 *   **Zero-Multiplication Boundary Checks:** Completely eliminates expensive CPU multiplication (`imul`) instructions from the critical allocation path. Since the metadata array cell widths are scaled strictly to powers of two ($1, 2, 4, \text{or } 8$ bytes), calculating the current metadata offset boundary is resolved using an ultra-fast bitwise shift left (`<< meta_type`). This reduces the boundary check to a single addition and shift, executing in just 1-2 CPU cycles.
 *   **Arbitrary Power-of-Two Alignment:** Supports customized alignment boundaries (powers of two) for individual allocations, up to the stack's total capacity. Essential for SIMD vectors, cache-line aligned arrays, and hardware DMA buffers.
 *   **Compiler Agnostic & Optimization Resilient:** Verified to work flawlessly across all compiler optimization levels (`-O1` through `-O3`, `-Os`, `-Oz`, `/O1`, `/O2`, `/Ox`). Built with strict adherence to **Strict Aliasing** rules, ensuring that aggressive compiler optimizations never break internal layout mechanics.
@@ -142,7 +142,7 @@ Rather than benchmarking only a single shallow depth, the suite tests scaling ac
 With a 64 KB capacity, `easy_stack` configures itself to use ultra-compact **Type 1 (16-bit)** metadata offsets.
 
 <p align="center">
-  <img src=".github/assets/throughput_64kb_chart.png" width="750" alt="Throughput Scaling vs Stack Allocation Depth at 64KB" />
+  <img src="https://raw.githubusercontent.com/EasyMem/easy_stack/refs/heads/main/.github/assets/throughput_64kb_chart.png" width="750" alt="Throughput Scaling vs Stack Allocation Depth at 64KB" />
 </p>
 
 At shallow depths (15 objects), the entire active allocator footprint (header + 30 bytes of metadata) fits completely into a **single 64-byte L1 cache line**. This yields a hardware-limit speed of **939 Million ops/sec** (~1.06 ns per allocation/free cycle) in Contract mode, outperforming the C++ template LIFO allocator by **371%**.
@@ -166,7 +166,7 @@ make bench DEPTH=100
 This ensures that at depth 100, the metadata array alone spans multiple cache lines, removing any artificial L1 prefetching advantages. Here is how the allocator scales under the heavier 32-bit math path:
 
 <p align="center">
-  <img src=".github/assets/throughput_1mb_chart.png" width="750" alt="Throughput Scaling vs Stack Allocation Depth at 1MB" />
+  <img src="https://raw.githubusercontent.com/EasyMem/easy_stack/refs/heads/main/.github/assets/throughput_1mb_chart.png" width="750" alt="Throughput Scaling vs Stack Allocation Depth at 1MB" />
 </p>
 
 #### Key Takeaways:
@@ -192,7 +192,7 @@ Traditional stack allocators prefix each block with a fixed 16-byte inline heade
 Below is a comparison of usable payload space in a **10 KB buffer** across different allocation sizes:
 
 <p align="center">
-  <img src=".github/assets/memory_efficiency_chart.png" width="700" alt="Memory Efficiency" />
+  <img src="https://raw.githubusercontent.com/EasyMem/easy_stack/refs/heads/main/.github/assets/memory_efficiency_chart.png" width="700" alt="Memory Efficiency" />
 </p>
 
 *   **For 8-byte allocations:** `easy_stack` lets you fit **2.40x more objects** into the same memory buffer (80% usable memory vs. 33%).
@@ -295,7 +295,7 @@ EStack *stack = estack_create(2048);
 
 void *p1 = estack_alloc(stack, 64);
 
-// Take a secure, XOR-hardened snapshot of the current stack state
+// Take an XOR-hardened snapshot of the current stack state
 EStackMarker marker = estack_get_marker(stack);
 
 // Make temporary allocations
@@ -377,7 +377,7 @@ Helps detect use-after-free and uninitialized memory usage.
 | `ESTACK_NO_ALIGN_HEADER` | *None* | Completely disables context header alignment (forces 1-byte boundary). Automatically enabled on 8/16-bit systems to eliminate padding waste. |
 | `ESTACK_DEFAULT_HEADER_ALIGNMENT` | *Auto* | Override the optimal context header alignment boundary (defaults to 64-byte for 64-bit, 32-byte for 32-bit platforms to prevent L1 cache line splits). |
 | `ESTACK_NO_BRANCH_HINTS` | *None* | Completely disables compiler branch prediction hints (`ESTACK_LIKELY` and `ESTACK_UNLIKELY`). |
-| `ESTACK_MAGIC` | `0xDEADBEEF..` | Magic number used for Stack Marker cryptographic XOR-encryption. |
+| `ESTACK_MAGIC` | `0xDEADBEEF..` | Magic number used for Stack Marker XOR integrity masking. |
 
 ---
 

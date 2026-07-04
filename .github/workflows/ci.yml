@@ -7,6 +7,7 @@ on:
       - 'easy_stack.h'
       - 'Makefile'
       - 'tests/**'
+      - 'fuzzers/**'
       - '.github/workflows/**'
   pull_request:
     branches: [ "main", "master" ]
@@ -304,3 +305,29 @@ jobs:
             
           # Run the test binary inside the simavr emulator
           simavr -m atmega328p avr_test.elf
+
+  # ==========================================
+  # 7. FUZZING SMOKE TEST (libFuzzer)
+  # ==========================================
+  fuzz-smoke:
+    name: fuzz-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: install-clang
+        run: sudo apt-get update && sudo apt-get install -y clang
+
+      - name: run-fuzzer
+        run: make fuzz_stack FUZZ_TIME=90
+
+      - name: upload-crash-artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: |
+            crash-*
+            leak-*
+            oom-*
+          if-no-files-found: ignore

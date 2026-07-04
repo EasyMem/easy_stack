@@ -4,6 +4,14 @@
 #define MAX_ALLOCS 512
 #define MAX_MARKERS 16
 
+/*
+ * Static arena for the estack_create_static path.
+ * Sized for the largest fuzzed capacity plus the word-offset jitter,
+ * and aligned to prevent raw header placement errors.
+ */
+#define FUZZ_MAX_CAPACITY ((size_t)131072)
+static uintptr_t fuzz_static_arena[(ESTACK_REQUIRED_BUFFER_SIZE(FUZZ_MAX_CAPACITY) + 64) / sizeof(uintptr_t)];
+
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     // We need enough bytes to initialize the stack and read at least one operation
     if (size < 12) return 0;
@@ -12,11 +20,34 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     int step = 0;
     (void)step;
 
-    // Read the stack capacity dynamically (between 256 and 65536 bytes)
-    size_t stack_capacity = (fuzz_read_size(data, &i, size) % 65280) + 256;
+    /*
+     * Pick the stack capacity so that every metadata cell width gets exercised:
+     *   mode 0 -> [MIN..255]        (uint8_t cells)
+     *   mode 1 -> [256..65535]      (uint16_t cells)
+     *   mode 2 -> [65536..131071]   (uint32_t cells)
+     */
+    uint8_t capacity_mode = fuzz_read_byte(data, &i, size) % 3;
+    size_t stack_capacity;
+    if (capacity_mode == 0) {
+        stack_capacity = (fuzz_read_size(data, &i, size) % (256 - ESTACK_MIN_BUFFER_SIZE)) + ESTACK_MIN_BUFFER_SIZE;
+    } else if (capacity_mode == 1) {
+        stack_capacity = (fuzz_read_size(data, &i, size) % 65280) + 256;
+    } else {
+        stack_capacity = (fuzz_read_size(data, &i, size) % 65536) + 65536;
+    }
 
-    // Direct standalone dynamic stack creation
-    EStack *stack = estack_create(stack_capacity);
+    // Alternate between heap-backed and user-buffer-backed stacks
+    bool use_static = (fuzz_read_byte(data, &i, size) % 2) == 0;
+
+    EStack *stack;
+    if (use_static) {
+        // Jitter the base address in word steps to vary internal padding and test alignment
+        size_t word_offset = (size_t)(fuzz_read_byte(data, &i, size) % 8) * sizeof(uintptr_t);
+        stack = estack_create_static((uint8_t *)fuzz_static_arena + word_offset,
+                                     ESTACK_REQUIRED_BUFFER_SIZE(stack_capacity));
+    } else {
+        stack = estack_create(stack_capacity);
+    }
     if (!stack) return 0;
 
     // Local state tracking to maintain correct LIFO ordering
@@ -30,7 +61,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     size_t marker_count = 0;
 
     FUZZ_LOG("\n--- STARTING STACK REPLAY ---\n");
-    FUZZ_LOG("Stack Capacity: %zu\n", stack_capacity);
+    FUZZ_LOG("Stack Capacity: %zu (mode %u, %s)\n", stack_capacity, capacity_mode, use_static ? "static" : "dynamic");
 
     while (i < size) {
         // Safely extract the operation code
@@ -43,9 +74,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
                 size_t alloc_size = (fuzz_read_size(data, &i, size) % 256) + 1;
                 
-                // Determine alignment dynamically: 4, 8, 16, 32, 64, or 128
-                size_t exponent = (fuzz_read_byte(data, &i, size) % 6) + 2; 
-                size_t alignment = (size_t)1 << exponent;
+                // Determine alignment dynamically starting from the configured minimum
+                size_t exponent = fuzz_read_byte(data, &i, size) % 5;
+                size_t alignment = ESTACK_MIN_ALIGNMENT << exponent;
 
                 FUZZ_LOG("[%d] STACK ALLOC: size %zu, align %zu -> ", step, alloc_size, alignment);
                 
@@ -88,13 +119,14 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
                 size_t idx = fuzz_read_byte(data, &i, size) % marker_count;
                 FUZZ_LOG("[%d] STACK ROLLBACK TO MARKER: idx %zu\n", step, idx);
 
+                size_t target_count = marker_alloc_counts[idx];
                 estack_free_to_marker(stack, markers[idx]);
 
-                // Synchronize our local state with the rolled back stack state
-                alloc_count = marker_alloc_counts[idx];
-                
-                // All markers created after the rolled-back state are now invalid
-                marker_count = idx; 
+                // Synchronize only if the rollback was accepted by the library (not a future marker)
+                if (target_count <= alloc_count) {
+                    alloc_count = target_count;
+                    marker_count = idx; 
+                }
                 break;
             }
             case 4: { // RESET OR RESET ZERO
