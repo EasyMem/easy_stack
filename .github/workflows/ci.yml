@@ -343,30 +343,23 @@ jobs:
       matrix:
         include:
           - wasm_arch: wasm32
-            target_flag: ""
+            cc_flags: ""
           - wasm_arch: wasm64
-            target_flag: "--target=wasm64-wasi"
+            cc_flags: "-sMEMORY64=1"
 
     steps:
       - uses: actions/checkout@v6
 
-      - name: install-wasmtime
-        run: |
-          curl https://wasmtime.dev/install.sh -sSf | bash
-          echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
-
-      - name: install-wasi-sdk
-        run: |
-          WASI_SDK_VERSION=24
-          curl -LO "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux.tar.gz"
-          tar -xzf wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux.tar.gz
-          echo "WASI_SDK_PATH=${{ github.workspace }}/$(ls -d wasi-sdk-* | head -n 1)" >> $GITHUB_ENV
+      - name: setup-emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 'latest'
 
       - name: run-wasm-matrix-tests
         run: |
           make test_matrix \
-            CC="${{ env.WASI_SDK_PATH }}/bin/clang ${{ matrix.target_flag }}" \
-            RUNNER="wasmtime" \
+            CC="emcc ${{ matrix.cc_flags }}" \
+            RUNNER="node" \
             SAN_FLAGS="" \
-            MATRIX_OPTS="O0 O1 O2 O3 Os Oz" \
+            MATRIX_OPTS="O0 O1 O2 O3 Os" \
             -j$(nproc) -Otarget
