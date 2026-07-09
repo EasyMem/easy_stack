@@ -14,10 +14,15 @@
       </div>
       <p style="margin-top: 10px; margin-bottom: 0;">
         <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+        <a href="https://github.com/EasyMem/easy_stack/blob/main/easy_stack.h"><img src="https://img.shields.io/github/size/EasyMem/easy_stack/easy_stack.h.svg?color=blue" alt="Header Size"></a>
         <a href="https://en.wikipedia.org/wiki/C11_(C_standard_revision)"><img src="https://img.shields.io/badge/Standard-C99%20%2F%20C11-blue.svg" alt="Standard"></a>
         <a href="https://www.codefactor.io/repository/github/easymem/easy_stack"><img src="https://www.codefactor.io/repository/github/easymem/easy_stack/badge" alt="CodeFactor"></a>
         <a href="https://codecov.io/gh/easymem/easy_stack"><img src="https://codecov.io/gh/easymem/easy_stack/graph/badge.svg" alt="codecov"></a>
+        <a href="https://github.com/google/fuzzing"><img src="https://img.shields.io/badge/Fuzzing-libFuzzer-blueviolet.svg" alt="Fuzzed with libFuzzer"></a>
         <a href="https://github.com/easymem/easy_stack/actions/workflows/ci.yml"><img src="https://github.com/easymem/easy_stack/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+        <a href="https://webassembly.org/"><img src="https://img.shields.io/badge/WebAssembly-wasm32%20%2F%20wasm64-blue?logo=webassembly&logoColor=white" alt="WebAssembly"></a>
+        <a href="https://registry.platformio.org/libraries/gooderfreed/easy_stack"><img src="https://badges.registry.platformio.org/packages/gooderfreed/library/easy_stack.svg" alt="PlatformIO Registry" /></a>
+        <a href="https://www.arduinolibraries.info/libraries/easy_stack"><img src="https://img.shields.io/badge/Arduino-Available-00979D.svg?logo=arduino&amp;logoColor=white" alt="Arduino Available"></a>
       </p>
     </td>
   </tr>
@@ -43,13 +48,14 @@
 *   **Dynamic Metadata Bit-Width Scaling:** Unlike traditional stack allocators that prefix each allocation with a fixed-size inline header (typically 16 bytes on 64-bit platforms), `easy_stack` dynamically scales metadata cells to 1, 2, 4, or 8 bytes based on overall buffer capacity. For standard frame workloads (< 64 KB), offset cells take only 2 bytes—unlocking up to an **8x reduction in metadata overhead**.
 *   **L1 Cache Line "Free Lunch" Optimization:** The compact `EStack` header requires only 2 machine words (16 bytes on 64-bit systems). By default, on modern desktop and application processors, the library automatically aligns the header boundary to 64-byte or 32-byte cache lines. This guarantees that fetching the stack header into cache automatically and instantly prefetches the **first 24 active metadata offsets** for **free**, bypassing main memory latency entirely.
 *   **XOR-Hardened Stack Markers:** Rollback states (markers) are masked by XORing the current allocation index and signature with the stack's base memory address and `ESTACK_MAGIC`. This catches cross-allocator marker pollution (e.g., passing Stack A's marker to Stack B) and accidental marker corruption with **zero runtime overhead** (1-cycle XOR instructions).
-*   **Zero-Multiplication Boundary Checks:** Completely eliminates expensive CPU multiplication (`imul`) instructions from the critical allocation path. Since the metadata array cell widths are scaled strictly to powers of two ($1, 2, 4, \text{or } 8$ bytes), calculating the current metadata offset boundary is resolved using an ultra-fast bitwise shift left (`<< meta_type`). This reduces the boundary check to a single addition and shift, executing in just 1-2 CPU cycles.
+*   **Zero-Multiplication Boundary Checks:** Completely eliminates expensive CPU multiplication (`imul`) instructions from the critical allocation path. Since the metadata array cell widths are scaled strictly to powers of two (1, 2, 4, or 8 bytes), calculating the current metadata offset boundary is resolved using an ultra-fast bitwise shift left (`<< meta_type`). This reduces the boundary check to a single addition and shift, executing in just 1-2 CPU cycles.
 *   **Arbitrary Power-of-Two Alignment:** Supports customized alignment boundaries (powers of two) for individual allocations, up to the stack's total capacity. Essential for SIMD vectors, cache-line aligned arrays, and hardware DMA buffers.
 *   **Compiler Agnostic & Optimization Resilient:** Verified to work flawlessly across all compiler optimization levels (`-O1` through `-O3`, `-Os`, `-Oz`, `/O1`, `/O2`, `/Ox`). Built with strict adherence to **Strict Aliasing** rules, ensuring that aggressive compiler optimizations never break internal layout mechanics.
 *   **Minimal Header Footprint:** The `EStack` header is extremely compact, consuming exactly 2 machine words (16 bytes on 64-bit systems, 8 bytes on 32-bit systems) to store overall capacity, dynamic metadata bit-width, allocation index, and the dynamic allocation flag. If `ESTACK_NO_ALIGN_HEADER` is defined (which is forced automatically on 8/16-bit platforms), the header alignment padding is completely eliminated to maximize usable space.
 *   **Concurrency Model:** Intentionally lock-free and single-threaded to avoid mutex overhead. Designed for **Thread-Local Storage (TLS)** patterns (one `EStack` instance per thread).
 *   **Embedded and Bare-Metal Ready:** Zero dependencies on standard `libc` heap managers. Can compile on bare-metal architectures with zero feature degradation (`ESTACK_NO_MALLOC`).
 *   **Full C++ Compatibility:** Wrapped in `extern "C"` for seamless integration into both C and C++ codebases.
+*   **WebAssembly & Emscripten Optimized:** Fully compliant with 32-bit and 64-bit WebAssembly environments (`wasm32-wasi` and `wasm64-wasi` via Emscripten / WASI). The dynamic metadata scaling is extremely beneficial for web-based engines, minimizing the linear memory footprint of the compiled modules.
 
 ---
 
@@ -114,9 +120,9 @@ Traditional stack allocators suffix or prefix each payload with inline metadata 
 
 1. **Decoupled Alignment:** Payloads are aligned backward at the end of the buffer. Metadata remains packed as a dense array of unaligned, scaled integers at the beginning of the buffer. Because metadata and payloads never sit inline next to each other, **no alignment padding is ever wasted in the control zone**.
 2. **Dynamic Scaling:**
-   * If capacity $\le$ 255 bytes: Offsets are stored as 1-byte `uint8_t` values.
-   * If capacity $\le$ 65535 bytes: Offsets are stored as 2-byte `uint16_t` values.
-   * If capacity $\le$ 4 GB: Offsets are stored as 4-byte `uint32_t` values.
+   * If capacity ≤ 255 bytes: Offsets are stored as 1-byte `uint8_t` values.
+   * If capacity ≤ 65535 bytes: Offsets are stored as 2-byte `uint16_t` values.
+   * If capacity ≤ 4 GB: Offsets are stored as 4-byte `uint32_t` values.
    * Larger capacities scale to 8-byte `uint64_t` values.
 3. **Collision Detection:** The allocation cursor checks if the aligned payload address is less than the end of the metadata array (`aligned_ptr < meta_end`). If true, a Stack Overflow is safely caught.
 
@@ -217,6 +223,43 @@ Or compile it directly into its own object file:
 # Example Makefile rule
 easy_stack.o: easy_stack.h
 	gcc -x c -DEASY_STACK_IMPLEMENTATION -c easy_stack.h -o easy_stack.o
+```
+*Note: For WebAssembly builds, simply substitute `gcc` with `emcc` (use `-m64` to target 64-bit WASM environments).*
+
+### Integration via CMake
+
+You can integrate `easy_stack` into CMake projects using one of the following methods:
+
+#### Option A: Standard Header-Only (`INTERFACE` library)
+The most common approach. You include the header and define the implementation in one of your C source files manually.
+
+```cmake
+add_library(easy_stack INTERFACE)
+target_include_directories(easy_stack INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+# Now simply link it: target_link_libraries(your_target PRIVATE easy_stack)
+```
+
+#### Option B: Precompiled Implementation (`OBJECT` library)
+If you prefer to compile the implementation once and link it everywhere without polluting your source files with `#define EASY_STACK_IMPLEMENTATION`:
+
+```cmake
+add_library(easy_stack OBJECT)
+target_sources(easy_stack PRIVATE easy_stack.h)
+
+set_source_files_properties(easy_stack.h PROPERTIES
+    HEADER_FILE_ONLY FALSE
+    LANGUAGE C
+    COMPILE_DEFINITIONS "EASY_STACK_IMPLEMENTATION"
+)
+
+# Force the compiler to treat the .h file as C source code
+if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+    set_source_files_properties(easy_stack.h PROPERTIES COMPILE_FLAGS "-x c")
+elseif(MSVC)
+    set_source_files_properties(easy_stack.h PROPERTIES COMPILE_FLAGS "/TC")
+endif()
+
+# Now link the precompiled object: target_link_libraries(your_target PRIVATE easy_stack)
 ```
 
 ### 2. Standard Heap Allocations (Dynamic)
@@ -399,15 +442,20 @@ The library is continuously integrated and tested across a matrix of OSs and Arc
 | GCC (MinGW) | ![GCC Status](https://img.shields.io/github/actions/workflow/status/EasyMem/easy_stack/ci.yml?job=windows-latest%20%7C%20x86_64%20%7C%20gcc&label=gcc%20(mingw)&logo=windows&logoColor=white) |
 | Clang       | ![Clang Status](https://img.shields.io/github/actions/workflow/status/EasyMem/easy_stack/ci.yml?job=ubuntu-latest%20%7C%20x86_64%20%7C%20clang&label=clang&logo=llvm&logoColor=white) |
 | MSVC        | ![MSVC Status](https://img.shields.io/github/actions/workflow/status/EasyMem/easy_stack/ci.yml?job=windows-latest%20%7C%20x86_64%20%7C%20gcc&label=msvc&logo=visualstudio&logoColor=white) |
+| Emscripten  | ![Emscripten Status](https://img.shields.io/github/actions/workflow/status/EasyMem/easy_stack/ci.yml?job=wasm-tests%20%28wasm32%29&label=emcc&logo=webassembly&logoColor=white) |
 
 ### By Architecture
 | Architecture | Endianness | OS / Environment | Status |
 | :--- | :--- | :--- | :--- |
 | `x86_64`  | Little  | Windows / Linux / macOS | ![x86_64 Status](https://img.shields.io/github/actions/workflow/status/EasyMem/easy_stack/ci.yml?branch=main&job=build-and-test-x86_64&label=x86_64&logo=intel&logoColor=white) |
 | `x86_32`  | Little  | Windows / Linux | ![x86_32 Status](https://img.shields.io/github/actions/workflow/status/EasyMem/easy_stack/ci.yml?branch=main&job=build-and-test-32bit&label=x86_32&logo=intel&logoColor=white) |
-| `AArch64` | Little  | Windows (Native ARM64) / Linux | ![ARM64 Status](https://img.shields.io/github/actions/workflow/status/EasyMem/easy_stack/ci.yml?branch=main&job=build-and-test-arm64-modern&label=aarch64&logo=arm&logoColor=white) |
+| `AArch64` | Little  | macOS (Apple Silicon) / Linux / Windows 11 ARM | ![ARM64 Status](https://img.shields.io/github/actions/workflow/status/EasyMem/easy_stack/ci.yml?branch=main&job=build-and-test-arm64-modern&label=aarch64&logo=arm&logoColor=white) |
 | `ARMv7`   | Little  | Linux | ![ARM32 Status](https://img.shields.io/github/actions/workflow/status/EasyMem/easy_stack/ci.yml?job=Ubuntu%20%7C%20ARM32%20(armv7)%20%7C%20GCC&label=armv7&logo=arm&logoColor=white) |
 | `s390x`   | **Big** | Linux | ![Big Endian Status](https://img.shields.io/github/actions/workflow/status/EasyMem/easy_stack/ci.yml?branch=main&job=build-and-test-big-endian&label=s390x&logo=ibm&logoColor=white) |
+| `wasm32`  | Little  | Web Browser / Node.js (WASI) | ![wasm32 Status](https://img.shields.io/github/actions/workflow/status/EasyMem/easy_stack/ci.yml?job=wasm-tests%20%28wasm32%29&label=wasm32&logo=webassembly&logoColor=white) |
+| `wasm64`  | Little  | Modern Web / Node.js (Memory64) | ![wasm64 Status](https://img.shields.io/github/actions/workflow/status/EasyMem/easy_stack/ci.yml?job=wasm-tests%20%28wasm64%29&label=wasm64&logo=webassembly&logoColor=white) |
+
+
 
 ### C Standards Compliance
 | Standard | Status |
