@@ -350,6 +350,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: setup-node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
       - name: setup-emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
