@@ -345,7 +345,7 @@ jobs:
           - wasm_arch: wasm32
             cc_flags: ""
           - wasm_arch: wasm64
-            cc_flags: "-sMEMORY64=1"
+            cc_flags: "-m64"
 
     steps:
       - uses: actions/checkout@v6
@@ -362,4 +362,5 @@ jobs:
             RUNNER="node" \
             SAN_FLAGS="" \
             MATRIX_OPTS="O0 O1 O2 O3 Os" \
+            EXTRA_CFLAGS="-g0 -Wno-limited-postlink-optimizations" \
             -j$(nproc) -Otarget
