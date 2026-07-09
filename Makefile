@@ -23,27 +23,29 @@ ifneq (,$(filter MINGW% MSYS%,$(UNAME_S)))
 endif
 
 CC ?= clang
+RUNNER ?=
 STD_C ?= c99
 BASE_CFLAGS = -Werror -Wall -Wextra \
-	     -Wshadow \
-		 -Wconversion -Wsign-conversion \
-		 -Wundef \
-		 -Wstrict-aliasing=1 \
-		 -Wpointer-arith \
-		 -Wdouble-promotion \
-		 -Wcast-align \
-		 -Wcast-qual \
-		 -Wmissing-declarations \
-		 -Wmissing-prototypes \
-		 -Wstrict-prototypes \
-		 -Wpadded \
-		 -Wint-to-pointer-cast \
-		 -Wpointer-to-int-cast \
-		 -W -std=$(STD_C) \
-		 -g3 \
-		 -fno-omit-frame-pointer \
-		 -fno-sanitize-recover=all \
-		 -I.
+             -Wshadow \
+             -Wconversion -Wsign-conversion \
+             -Wundef \
+             -Wstrict-aliasing=1 \
+             -Wpointer-arith \
+             -Wdouble-promotion \
+             -Wcast-align \
+             -Wcast-qual \
+             -Wmissing-declarations \
+             -Wmissing-prototypes \
+             -Wstrict-prototypes \
+             -Wpadded \
+             -Wint-to-pointer-cast \
+             -Wpointer-to-int-cast \
+             -W -std=$(STD_C) \
+             -g3 \
+             -fno-omit-frame-pointer \
+             -fno-sanitize-recover=all \
+             -I.
+
 CFLAGS = $(BASE_CFLAGS) $(EXTRA_CFLAGS)
 DEBUG_FLAGS = -DDEBUG # Debug flag
 COV_FLAGS = -O0 -fprofile-arcs -ftest-coverage --coverage # Coverage flags
@@ -105,7 +107,7 @@ $(TEST_DIR)/%_coverage: $(TEST_DIR)/%.cov.o
 # Pattern rule for running individual tests (always with debug)
 test_%: $(TEST_DIR)/%_test_debug
 	@printf "\n--- Running $< (debug mode) ---\n"
-	@./$<
+	@$(RUNNER) ./$<
 	@if [ $$? -ne 0 ]; then \
 		printf "\nTest $< FAILED!\n"; \
 		exit 1; \
@@ -138,7 +140,7 @@ tests: build_silent
 	@exit_code=0; \
 	for test in $(TEST_SRCS:%.c=%_silent) ; do \
 		printf "\n--- Running $$test ---\n" ; \
-		$(LSAN_RUN_FIX) ./$$test ; \
+		$(LSAN_RUN_FIX) $(RUNNER) ./$$test ; \
 		if [ $$? -ne 0 ]; then \
 			printf "\nTest $$test FAILED with exit code $$?\n"; \
 			exit_code=1; \
@@ -157,7 +159,7 @@ tests_full: build_debug
 	@exit_code=0; \
 	for test in $(TEST_SRCS:%.c=%_debug) ; do \
 		printf "\n--- Running $$test ---\n" ; \
-		$(LSAN_RUN_FIX) ./$$test ; \
+		$(LSAN_RUN_FIX) $(RUNNER) ./$$test ; \
 		if [ $$? -ne 0 ]; then \
 			printf "\nTest $$test FAILED with exit code $$?\n"; \
 			exit_code=1; \
@@ -230,7 +232,7 @@ $(MATRIX_DIR)/$(1)_$(2)_p$(3)/$(4): $(TEST_DIR)/$(4).c easy_stack.h $(TEST_DIR)/
 .PHONY: run_matrix_$(1)_$(2)_p$(3)_$(4)
 run_matrix_$(1)_$(2)_p$(3)_$(4): $(MATRIX_DIR)/$(1)_$(2)_p$(3)/$(4)
 	@printf "\n=== Running: Std: $(1) | Opt: -$(2) | Pol: $(3) | Test: $(4) ===\n"
-	@if $$(LSAN_RUN_FIX) ./$$< ; then \
+	@if $$(LSAN_RUN_FIX) $$(RUNNER) ./$$< ; then \
 		printf "[OK] Test passed.\n"; \
 	else \
 		printf "[FAIL] Test failed!\n"; \

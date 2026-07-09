@@ -69,3 +69,4 @@ fuzzers/*_fuzzer
 
 benchmark
 benchmark_*
+wasi*

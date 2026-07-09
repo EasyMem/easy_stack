@@ -331,3 +331,42 @@ jobs:
             leak-*
             oom-*
           if-no-files-found: ignore
+
+  # ==========================================
+  # 8. WEBASSEMBLY (wasm32 & wasm64)
+  # ==========================================
+  wasm-tests:
+    name: wasm-${{ matrix.wasm_arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - wasm_arch: wasm32
+            target_flag: ""
+          - wasm_arch: wasm64
+            target_flag: "--target=wasm64-wasi"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: install-wasmtime
+        run: |
+          curl https://wasmtime.dev/install.sh -sSf | bash
+          echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
+
+      - name: install-wasi-sdk
+        run: |
+          WASI_SDK_VERSION=24
+          curl -LO "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux.tar.gz"
+          tar -xzf wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux.tar.gz
+          echo "WASI_SDK_PATH=${{ github.workspace }}/$(ls -d wasi-sdk-* | head -n 1)" >> $GITHUB_ENV
+
+      - name: run-wasm-matrix-tests
+        run: |
+          make test_matrix \
+            CC="${{ env.WASI_SDK_PATH }}/bin/clang ${{ matrix.target_flag }}" \
+            RUNNER="wasmtime" \
+            SAN_FLAGS="" \
+            MATRIX_OPTS="O0 O1 O2 O3 Os Oz" \
+            -j$(nproc) -Otarget
