@@ -1,7 +1,7 @@
 {
   "name": "easy_stack",
-  "version": "1.2.0",
-  "description": "An absurdly fast, header-only, platform-agnostic, and safe LIFO stack allocator utilizing an inverted bi-directional buffer layout with dynamic metadata scaling.",
+  "version": "1.2.1",
+  "description": "A zero-compromise, header-only C/C++ LIFO stack allocator utilizing an inverted bi-directional buffer layout with dynamic metadata scaling.",
   "keywords": "allocator, memory, lifo, stack, embedded, performance, safe",
   "repository": {
     "type": "git",
