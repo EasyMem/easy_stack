@@ -70,3 +70,5 @@ fuzzers/*_fuzzer
 benchmark
 benchmark_*
 wasi*
+perf.data
+bench/perf*

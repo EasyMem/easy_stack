@@ -30,13 +30,16 @@
 
 <br/>
 
-**An absurdly fast, header-only, platform-agnostic, and safe LIFO stack allocator utilizing an inverted bi-directional buffer layout with dynamic metadata scaling.**
+**A zero-compromise, header-only C/C++ LIFO stack allocator that outperforms compile-time templates and system baselines in both execution speed and memory footprint simultaneously — even under full runtime safety.**
 
 ## TL;DR
 
-**What is it?** A portable, extremely fast, single-header stack allocator that completely decouples control paths from aligned user payloads. It eliminates inline metadata overhead entirely by growing tracking offsets forward and aligned payloads backward.
+**What is it?** A portable, single-header LIFO stack allocator that completely decouples control paths from aligned user payloads. It eliminates inline metadata overhead entirely by growing tracking offsets forward and aligned payloads backward.
 
-**Why use it?** To achieve deterministic **O(1)** allocation and deallocation speeds that outperform traditional C allocators (like `wb_alloc`) by up to **4.1x+** and compile-time optimized C++ templates (like `Trebi`) by up to **4.7x+** in trusted mode (while remaining **2.5x+ faster** than both even with full runtime defensive safety active), all while retaining up to an **8x smaller metadata footprint**.
+**Why use it?** Traditional memory allocators force you to trade execution speed for runtime safety, or memory footprint for performance. `easy_stack` breaks this triple trade-off, delivering:
+* **Highest-in-Class Performance**: Outperforms compile-time C++ templates (like `Trebi`) by up to **2.7x+** and standard heap managers (like `malloc`) by up to **10x+** in algorithmic speed.
+* **Zero-Cost Safety**: Even with full defensive runtime safety, bounds checking, and API sanitization active, it retains a performance advantage over *unprotected* competitor alternatives.
+* **Maximum Memory Efficiency**: Uses up to an **8x smaller metadata footprint** compared to traditional inline headers and wastes exactly zero bytes on alignment padding in the control zone.
 
 **How to use it?** `#define EASY_STACK_IMPLEMENTATION` in one `.c` file, then just `#include "easy_stack.h"`.
 
@@ -130,66 +133,92 @@ Traditional stack allocators suffix or prefix each payload with inline metadata 
 
 ## Benchmarks & Performance
 
-To verify execution speed, cache resilience, and scalability under load, `easy_stack` was benchmarked against popular alternatives:
-*   **wb_alloc (Bundy):** A widely-used, minimalist C arena allocator.
-*   **Trebi StackAllocator:** A standard C++ LIFO stack allocator (compiled with `-flto` for maximum devirtualization).
+To evaluate execution speed, cache resilience, and scalability under different workloads, `easy_stack` was benchmarked against popular alternatives.
 
 ### Test Environment
-*   **CPU:** AMD Ryzen 7 4700U (8 Cores / 8 Threads, Zen 2 @ up to 4.1 GHz)
-*   **Compiler:** GCC 15.2 with `-O3 -flto -DNDEBUG`
-*   **Scenario:** 2,000,000 iterations per run (executing up to 480,000,000 allocator operations) of nested allocations with randomized sizes (16-160 bytes) scaled across three distinct stack allocation depths (15, 30, and 100). Best of 25 runs.
+* **CPU**: AMD Ryzen 7 4700U (8 Cores / 8 Threads, Zen 2 @ up to 4.1 GHz)
+* **Compiler**: GCC 16.1 with -O3 -flto -DNDEBUG
+* **Scenario**: 2,000,000 iterations per run (executing up to 480,000,000 allocator operations) of nested allocations with randomized sizes scaled across three distinct stack allocation depths (15, 30, and 100). Best of 25 runs.
 
-### 1. Throughput & Cache-Line Scaling (Speed)
-
-Rather than benchmarking only a single shallow depth, the suite tests scaling across three critical architectural boundaries. This highlights how cache layout and processor prefetching impact execution speed as stack depth increases.
-
-#### Phase A: The Standard 64 KB Workload (16-bit Metadata)
-
-With a 64 KB capacity, `easy_stack` configures itself to use ultra-compact **Type 1 (16-bit)** metadata offsets.
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/EasyMem/easy_stack/refs/heads/main/.github/assets/throughput_64kb_chart.png" width="750" alt="Throughput Scaling vs Stack Allocation Depth at 64KB" />
-</p>
-
-At shallow depths (15 objects), the entire active allocator footprint (header + 30 bytes of metadata) fits completely into a **single 64-byte L1 cache line**. This yields a hardware-limit speed of **939 Million ops/sec** (~1.06 ns per allocation/free cycle) in Contract mode, outperforming the C++ template LIFO allocator by **371%**.
+### Tested Allocators:
+1. **EasyStack (Contract)**: Trusted mode with validations delegated to assertions (compiled out in release).
+2. **EasyStack (Defensive)**: Default safety mode with full runtime bounds and API sanitization active.
+3. **Trebi LIFO**: A highly-optimized C++ template-based LIFO stack allocator.
+4. **GNU Obstack**: The glibc standard stack allocator (highly optimized C system baseline).
+5. **wb_alloc (Bundy)**: A popular fixed-size C arena/stack allocator.
+6. **std::stack + malloc**: The default standard library heap-allocated baseline.
 
 ---
 
-#### Phase B: The Transparent 1 MB Workload (32-bit Metadata)
+### Methodology & Metrics
 
-> *"Wait a minute! You're cheating! By using a tiny 64 KB buffer, you guarantee that all metadata easily fits inside L1 cache. Let's see what happens on a larger stack."*
+We evaluate performance using two distinct metrics to provide a transparent picture of real-world overhead:
+* **RAW Throughput**: The total execution time including loop control and function-call overhead. This represents the actual performance experienced by an application calling these routines.
+* **PURE Algorithmic Throughput**: Calculated by subtracting the baseline harness overhead (measured via a stateful dummy call wrapper). This isolates the pure overhead of the allocator's internal logic (pointer arithmetic, dynamic metadata scaling, alignment padding math, and safety checks).
 
-The objection is logically sound. To address this, the stack capacity was scaled up.
+To prevent compile-time folding, dead-code elimination (DCE), or loop hoisting by aggressive GCC 16 optimizations, the benchmark utilizes a strict **Data Dependency Chain**. Every allocation writes a dynamic payload bound to its physical runtime address, and these payloads are read back and accumulated into a volatile global checksum sink prior to deallocation.
 
-In **Defensive** and **Contract** modes, the capacity was increased to **1 MB**, automatically triggering the transition to 4-byte metadata offsets (`meta_type = 2`).
+---
 
-```bash
-# Run benchmark with custom depth
-make bench DEPTH=30
-make bench DEPTH=100
-```
-
-This ensures that at depth 100, the metadata array alone spans multiple cache lines, removing any artificial L1 prefetching advantages. Here is how the allocator scales under the heavier 32-bit math path:
+### 1. Small Payload Workloads (16 – 128 Bytes)
+*Designed to simulate standard stack frame allocations, temporary object creation, and shallow trees.*
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/EasyMem/easy_stack/refs/heads/main/.github/assets/throughput_1mb_chart.png" width="750" alt="Throughput Scaling vs Stack Allocation Depth at 1MB" />
+  <img src="https://raw.githubusercontent.com/EasyMem/easy_stack/refs/heads/main/.github/assets/throughput_small_payloads.png" width="800" alt="Small Payloads Throughput Scaling" />
 </p>
 
-#### Key Takeaways:
+#### RAW Results (Best of 25 runs, 2,000,000 iterations/run)
+| Allocator | Depth 15 (M ops/s) | Depth 30 (M ops/s) | Depth 100 (M ops/s) |
+| :--- | :---: | :---: | :---: |
+| **EasyStack (Contract)** | **576.40** | **516.74** | **493.63** |
+| **EasyStack (Defensive)** | **415.25** | **385.75** | **402.64** |
+| GNU Obstack | 396.85 | 379.33 | 311.31 |
+| Trebi LIFO (C++) | 365.55 | 358.51 | 360.20 |
+| std::stack + malloc | 209.89 | 214.63 | 188.13 |
+| wb_alloc (Bundy) | 208.18 | 204.88 | 229.38 |
 
-*   **Zero-Overhead Metadata Scaling:** 
-    Comparing the 64 KB buffer (16-bit) vs the 1 MB buffer (32-bit), the throughput drop in Contract mode is **less than 0.5%** at depth 15 (**934 Million ops/sec** vs 939 Million) and only **2.7%** at depth 100 (**717 Million** vs 738 Million). This demonstrates that dynamically widening metadata cells has a negligible performance impact on modern superscalar architectures.
-    
-*   **Instruction Latency Hiding (Defensive Mode Stability):** 
-    In Defensive (Safety) mode, throughput remains completely flat at a rock-solid **~520-550 Million ops/sec** across both 64 KB and 1 MB buffers, regardless of stack allocation depth. 
-    
-    The execution of defensive `if` branches and bounds checks occupies the ALU instruction pipeline. During this execution window, the CPU's prefetcher asynchronously loads upcoming metadata cache lines in the background. By the time safety checks are evaluated, the memory is already waiting in L1, resulting in a **zero-cycle memory stall**.
-    
-*   **Absolute Dominance:** 
-    Even under full runtime safety checks and larger capacities, **EasyStack remains up to 191% faster than Trebi (C++) and 153% faster than wb_alloc (C)**.
+#### PURE Algorithmic Results (Harness Overhead Subtracted)
+| Allocator | Depth 15 (M ops/s) | Depth 30 (M ops/s) | Depth 100 (M ops/s) |
+| :--- | :---: | :---: | :---: |
+| **EasyStack (Contract)** | **2747.82** | **2408.14** | **4972.83** |
+| **EasyStack (Defensive)** | **1076.10** | **941.91** | **1566.77** |
+| GNU Obstack | 870.41 | 895.82 | 720.72 |
+| Trebi LIFO (C++) | 732.81 | 787.78 | 1050.94 |
+| std::stack + malloc | 294.69 | 318.55 | 286.47 |
+| wb_alloc (Bundy) | 291.33 | 297.53 | 394.49 |
 
+---
 
-### 2. Memory Efficiency (Payload vs. Overhead)
+### 2. Large Payload Workloads (512 – 4096 Bytes)
+*Designed to simulate heavy SIMD vectors, DMA buffers, and large temporary data arrays.*
+
+<p align="center">
+    <img src="https://raw.githubusercontent.com/EasyMem/easy_stack/refs/heads/main/.github/assets/throughput_large_payloads.png" width="800" alt="Large Payloads Throughput Scaling" />
+</p>
+
+#### RAW Results (Best of 25 runs, 2,000,000 iterations/run)
+| Allocator | Depth 15 (M ops/s) | Depth 30 (M ops/s) | Depth 100 (M ops/s) |
+| :--- | :---: | :---: | :---: |
+| **EasyStack (Contract)** | **589.30** | **506.21** | **494.47** |
+| **EasyStack (Defensive)** | **431.45** | **393.71** | **369.90** |
+| Trebi LIFO (C++) | 364.19 | 360.50 | 354.11 |
+| wb_alloc (Bundy) | 70.66 | 69.06 | 67.70 |
+| GNU Obstack | 57.07 | 58.45 | 56.06 |
+| std::stack + malloc | 43.13 | 45.57 | 42.78 |
+
+#### PURE Algorithmic Results (Harness Overhead Subtracted)
+| Allocator | Depth 15 (M ops/s) | Depth 30 (M ops/s) | Depth 100 (M ops/s) |
+| :--- | :---: | :---: | :---: |
+| **EasyStack (Contract)** | **3834.49** | **2164.57** | **4460.48** |
+| **EasyStack (Defensive)** | **1215.93** | **1014.13** | **1141.30** |
+| Trebi LIFO (C++) | 763.55 | 793.38 | 974.88 |
+| wb_alloc (Bundy) | 78.64 | 77.12 | 77.09 |
+| GNU Obstack | 62.17 | 64.12 | 62.35 |
+| std::stack + malloc | 45.97 | 48.94 | 46.34 |
+
+---
+
+### 3. Memory Efficiency (Payload vs. Overhead)
 
 Traditional stack allocators prefix each block with a fixed 16-byte inline header (on 64-bit systems). On small allocations (common for temporary stacks), this inline overhead consumes up to **50%+ of your buffer**. 
 
@@ -198,14 +227,43 @@ Traditional stack allocators prefix each block with a fixed 16-byte inline heade
 Below is a comparison of usable payload space in a **10 KB buffer** across different allocation sizes:
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/EasyMem/easy_stack/refs/heads/main/.github/assets/memory_efficiency_chart.png" width="700" alt="Memory Efficiency" />
+    <img src="https://raw.githubusercontent.com/EasyMem/easy_stack/refs/heads/main/.github/assets/memory_efficiency_chart.png" width="700" alt="Memory Efficiency" />
 </p>
 
-*   **For 8-byte allocations:** `easy_stack` lets you fit **2.40x more objects** into the same memory buffer (80% usable memory vs. 33%).
-*   **For 16-byte allocations:** `easy_stack` lets you fit **1.77x more objects** into the same memory buffer (89% usable memory vs. 50%).
+* **For 8-byte allocations:** `easy_stack` lets you fit **2.40x more objects** into the same memory buffer (80% usable memory vs. 33%).
+* **For 16-byte allocations:** `easy_stack` lets you fit **1.77x more objects** into the same memory buffer (89% usable memory vs. 50%).
+
+*Note: The chart above represents the absolute best-case scenario for the traditional allocator, assuming perfect power-of-two allocation sizes with 0 alignment padding. In real-world workloads with non-power-of-two sizes, traditional inline-header allocators suffer from internal fragmentation (wasting up to 7-15 bytes of alignment padding per block), which widens the efficiency gap even further in favor of `easy_stack`.*
 
 ---
-*Note: The chart above represents the absolute best-case scenario for the traditional allocator, assuming perfect power-of-two allocation sizes with 0 alignment padding. In real-world workloads with non-power-of-two sizes, traditional inline-header allocators suffer from internal fragmentation (wasting up to 7-15 bytes of alignment padding per block), which widens the efficiency gap even further in favor of `easy_stack`.*
+
+### 4. Hardware-Level Profiling (perf)
+
+To verify the microarchitectural efficiency of the allocator and isolate the hardware reasons behind these execution speeds, the benchmark suite (with `BENCH_ONLY_EASYSTACK` active) was profiled using Linux `perf` hardware performance counters on a Zen-architecture CPU. 
+
+The raw hardware counters and derived efficiency metrics across all tested stack depths are presented below:
+
+| Hardware Metric | Depth 15 | Depth 30 | Depth 100 |
+| :--- | :---: | :---: | :---: |
+| **Instructions Retired** | 77,054,323,714 | 77,054,323,942 | 77,054,324,011 |
+| **CPU Cycles** | 24,655,695,668 | 24,682,754,642 | 25,028,328,076 |
+| **Instructions Per Cycle (IPC)** | **3.13** | **3.12** | **3.08** |
+| **Total Branches** | 16,351,231,347 | 16,351,231,567 | 16,351,231,582 |
+| **Branch Mispredictions** | 20,580 | 23,757 | 22,401 |
+| **Branch Misprediction Rate (%)** | **0.00013%** | **0.00015%** | **0.00014%** |
+| **Cache References** | 4,382,622 | 2,355,244 | 2,789,922 |
+| **Cache Misses** | 27,865 | 53,731 | 34,509 |
+| **Cache Miss Rate (%)** | **0.64%** | **2.28%** | **1.24%** |
+
+---
+
+### Architectural Analysis of Hardware Metrics:
+
+* **Instruction Pipeline Saturation (IPC)**: Operating at **`3.08 - 3.13 IPC`** (calculated as instructions / cycles) is an exceptional result. While complex system-level workloads typically average `1.2 - 1.8 IPC` due to CPU pipeline stalls waiting for RAM data, EasyStack keeps the processor executing more than 3 instructions per clock cycle with near-zero execution stalls or data dependencies.
+
+* **Near-Zero Branch Predictor Penalties**: Across billions of branches executed, the processor encountered a misprediction rate of just **`0.00013% - 0.00015%`** (calculated as branch-misses / branches). By eliminating heavy lookup loops, tree traversals, and dynamic boundary checks, the critical path compiles into a highly predictable, linear instruction stream, allowing the CPU to speculation-execute allocations hundreds of cycles ahead.
+
+* **L1 Data Cache Residency**: Cache misses remain extremely low, dropping to **`0.64%`** at depth 15 and hovering at just **`1.24%`** at maximum depth (calculated as cache-misses / cache-references). By segregating metadata from aligned user payloads (Inverted Layout), the active metadata array is tightly packed and remains resident in standard 64-byte L1 CPU cache lines, bypassing main memory latency entirely.
 
 ## Usage
 

@@ -7,148 +7,127 @@ plt.style.use('seaborn-v0_8-whitegrid')
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.sans-serif'] = ['Helvetica', 'Arial', 'DejaVu Sans']
 
-# Colors
-COLOR_EASY_1B = '#00f4ff'  # Ultra-bright cyan
-COLOR_EASY_2B = '#00adb5'  # Standard cyan
-COLOR_COMPETITOR = '#393e46'
+# Color Palette (Highly visible on both dark and light GitHub themes)
+COLOR_EASY_CON = '#00f4ff'  # Ultra-bright cyan (EasyStack Contract)
+COLOR_EASY_DEF = '#00adb5'  # Standard cyan (EasyStack Defensive)
+COLOR_OBSTACK = '#ff5722'   # Coral/Orange (GNU Obstack)
+COLOR_TREBI = '#e23e57'     # Crimson Red (Trebi LIFO C++)
+COLOR_WB = '#8c92ac'        # Slate Grey (wb_alloc)
+COLOR_MALLOC = '#393e46'    # Dark Grey (std::stack + malloc)
+
 TEXT_COLOR = '#eeeeee'
 GRID_COLOR = '#393e46'
-ARROW_COLOR = '#8c92ac'
+ARROW_COLOR = '#8c92ac'     # For Memory Efficiency chart arrows
 
 # Depths tested
 depths = np.array([15, 30, 100])
 
-def generate_throughput_chart(filename, title, throughput_contract, throughput_defensive, throughput_wb, throughput_trebi):
-    fig, ax = plt.subplots(figsize=(8.5, 4.5), facecolor='none')
+def generate_throughput_chart(filename, title, y_min, y_max, y_step,
+                              throughput_contract=None, throughput_defensive=None, 
+                              throughput_wb=None, throughput_trebi=None, 
+                              throughput_malloc=None, throughput_obstack=None):
+    
+    # Increased height to 5.8 inches for more vertical breathing room
+    fig, ax = plt.subplots(figsize=(9.5, 5.8), facecolor='none')
     ax.set_facecolor('none')
 
-    # Plot curves
+    # Plot clean lines with distinct styles and markers representing all 6 allocators
     ax.plot(depths, throughput_contract, marker='o', markersize=6, linewidth=2.5, linestyle='-',
-            color=COLOR_EASY_1B, label='EasyStack (Contract - Trusted Mode)')
+            color=COLOR_EASY_CON, label='EasyStack (Contract - Trusted Mode)')
 
     ax.plot(depths, throughput_defensive, marker='o', markersize=6, linewidth=2.5, linestyle='-',
-            color=COLOR_EASY_2B, label='EasyStack (Defensive - Full Safety Mode)')
+            color=COLOR_EASY_DEF, label='EasyStack (Defensive - Full Safety Mode)')
 
-    ax.plot(depths, throughput_wb, marker='s', markersize=5, linewidth=1.5, linestyle='--',
-            color=COLOR_COMPETITOR, label='wb_alloc (Bundy C-Reference)')
+    ax.plot(depths, throughput_obstack, marker='P', markersize=5, linewidth=1.5, linestyle='-',
+            color=COLOR_OBSTACK, label='GNU Obstack (glibc System Stack)')
 
-    ax.plot(depths, throughput_trebi, marker='^', markersize=5, linewidth=1.5, linestyle=':',
-            color='#8c92ac', label='Trebi LIFO (C++ StackAllocator)')
+    ax.plot(depths, throughput_trebi, marker='^', markersize=5, linewidth=1.5, linestyle='--',
+            color=COLOR_TREBI, label='Trebi LIFO (C++ Template Stack)')
 
-    # Apply Logarithmic Scale to X-axis to keep spacing clean and proportional (15 -> 30 -> 100)
+    ax.plot(depths, throughput_wb, marker='s', markersize=5, linewidth=1.5, linestyle=':',
+            color=COLOR_WB, label='wb_alloc (Bundy C Arena)')
+
+    ax.plot(depths, throughput_malloc, marker='x', markersize=5, linewidth=1.2, linestyle='-.',
+            color=COLOR_MALLOC, label='std::stack + malloc (Default Heap)')
+
+    # Apply Logarithmic Scale to X-axis for proportional spacing (15 -> 30 -> 100)
     ax.set_xscale('log', base=10)
     ax.set_xticks(depths)
     ax.xaxis.set_major_formatter(ticker.FormatStrFormatter('%d'))
-    ax.xaxis.set_minor_formatter(ticker.NullFormatter())  # Hide raw log labels
+    ax.xaxis.set_minor_formatter(ticker.NullFormatter()) 
 
-    # Draw comparison arrows and badges symmetrically with tight 4% horizontal offsets
+    # Clean linear axis limits and explicit stepping
+    ax.set_ylim(y_min, y_max)
+    ax.set_yticks(np.arange(y_min, y_max + 1, y_step))
+
+    # Add clean numeric value annotations STRICTLY ABOVE the dots (+15 offset)
     for i, d in enumerate(depths):
-        y_bottom = throughput_wb[i]
-        y_def = throughput_defensive[i]
-        y_top = throughput_contract[i]
+        val_con = throughput_contract[i]
+        val_def = throughput_defensive[i]
         
-        # Ultra-tight proportional offsets on log scale
-        d_left = d * 0.96
-        d_right = d * 1.04
-        
-        # 1. LEFT SIDE: Full Speedup Arrow (wb_alloc -> EasyStack Contract)
-        ax.annotate('', xy=(d_left, y_top - 15), xytext=(d_left, y_bottom + 15),
-                    arrowprops=dict(arrowstyle="<->", color=ARROW_COLOR, linestyle='--', linewidth=0.7))
-        
-        ratio_full = y_top / y_bottom
-        pct_full = (ratio_full - 1.0) * 100.0
-        badge_full = f"+{pct_full:.0f}%\n({ratio_full:.2f}x)"
-        
-        # Shift full-arrow badge slightly higher than the direct middle to clear the defensive line
-        y_text_full = y_bottom + (y_top - y_bottom) * 0.58
-        
-        ax.text(d_left * 0.95, y_text_full, badge_full, 
-                color=COLOR_EASY_1B, fontsize=7.6, fontweight='bold', 
-                va='center', ha='right',
-                bbox=dict(boxstyle='round,pad=0.2', facecolor='#1b1f24', edgecolor='none', alpha=0.85))
-                
-        # 2. RIGHT SIDE: Stacked Segmented Arrows (Defensive & Contract step-up)
-        x_text_right = d_right * 1.03
-        
-        # Lower Segment: wb_alloc -> EasyStack Defensive
-        ax.annotate('', xy=(d_right, y_def - 15), xytext=(d_right, y_bottom + 15),
-                    arrowprops=dict(arrowstyle="<->", color=ARROW_COLOR, linestyle='--', linewidth=0.7))
-        
-        ratio_def = y_def / y_bottom
-        pct_def = (ratio_def - 1.0) * 100.0
-        badge_def = f"+{pct_def:.0f}%\n({ratio_def:.2f}x)"
-        
-        ax.text(x_text_right, (y_def + y_bottom) / 2, badge_def, 
-                color=COLOR_EASY_2B, fontsize=7.6, fontweight='bold', 
-                va='center', ha='left',
-                bbox=dict(boxstyle='round,pad=0.2', facecolor='#1b1f24', edgecolor='none', alpha=0.85))
-                
-        # Upper Segment: EasyStack Defensive -> EasyStack Contract
-        ax.annotate('', xy=(d_right, y_top - 15), xytext=(d_right, y_def + 15),
-                    arrowprops=dict(arrowstyle="<->", color=ARROW_COLOR, linestyle='--', linewidth=0.7))
-                    
-        ratio_con = y_top / y_def
-        pct_con = (ratio_con - 1.0) * 100.0
-        badge_con = f"+{pct_con:.0f}%\n({ratio_con:.2f}x)"
-        
-        ax.text(x_text_right, (y_top + y_def) / 2, badge_con, 
-                color=COLOR_EASY_1B, fontsize=7.6, fontweight='bold', 
-                va='center', ha='left',
-                bbox=dict(boxstyle='round,pad=0.2', facecolor='#1b1f24', edgecolor='none', alpha=0.85))
+        ax.annotate(f"{val_con:.0f}M", (d, val_con + 15), 
+                    color=COLOR_EASY_CON, fontsize=8.5, fontweight='bold', ha='center')
+        ax.annotate(f"{val_def:.0f}M", (d, val_def + 15), 
+                    color=COLOR_EASY_DEF, fontsize=8.5, fontweight='bold', ha='center')
 
-    # Add value annotations strictly centered on the tick lines (no overlap with arrows)
-    for i, d in enumerate(depths):
-        ax.annotate(f"{throughput_contract[i]:.0f}M", (d, throughput_contract[i] + 16), 
-                    color=COLOR_EASY_1B, fontsize=8.5, fontweight='bold', ha='center')
-
-        ax.annotate(f"{throughput_defensive[i]:.0f}M", (d, throughput_defensive[i] + 15), 
-                    color=COLOR_EASY_2B, fontsize=8.5, fontweight='bold', ha='center')
-
-        ax.annotate(f"{throughput_wb[i]:.0f}M", (d, throughput_wb[i] + 12), 
-                    color=TEXT_COLOR, fontsize=8.0, fontweight='bold', ha='center')
-
-    # Format labels and grid
-    ax.set_xlabel('Stack Allocation Depth (Active Objects)', color=TEXT_COLOR, fontsize=11, fontweight='bold', labelpad=10)
-    ax.set_ylabel('Throughput (Million Operations / Second)', color=TEXT_COLOR, fontsize=11, fontweight='bold', labelpad=10)
+    # Format labels, axis limits, and grid lines
+    ax.set_xlabel('Stack Allocation Depth (Active Objects)', color=TEXT_COLOR, fontsize=11, fontweight='bold', labelpad=12)
+    ax.set_ylabel('Throughput (Million Operations / Second)', color=TEXT_COLOR, fontsize=11, fontweight='bold', labelpad=12)
     ax.tick_params(colors=TEXT_COLOR, labelsize=10)
     ax.grid(color=GRID_COLOR, linestyle='--', linewidth=0.5)
 
-    # Legend setup
-    legend = ax.legend(facecolor='#1b1f24', edgecolor=GRID_COLOR, fontsize=8.5, loc='upper right')
+    # Spacious legend configuration with optimal padding
+    legend = ax.legend(facecolor='#1b1f24', edgecolor=GRID_COLOR, fontsize=8.5, 
+                       loc='upper right', labelspacing=0.8, handletextpad=1.0)
     for text in legend.get_texts():
         text.set_color(TEXT_COLOR)
 
     ax.set_xlim(11, 130)
-    ax.set_ylim(100, 1050)
     plt.title(title, color=TEXT_COLOR, fontsize=13, fontweight='bold', pad=15)
     plt.tight_layout()
     plt.savefig(filename, dpi=300, transparent=True)
     plt.close()
 
-# Generate the 64 KB capacity chart (16-bit metadata)
+# ==============================================================================================
+#  CHART 1: Throughput with Small Payloads (Standard frame configurations)
+#  y_min is set to 150, step is set to 100
+# ==============================================================================================
 generate_throughput_chart(
-    'throughput_64kb_chart.png',
-    'Throughput Scaling (Buffer: 64KB, 16-bit Meta)',
-    throughput_contract=np.array([939.20, 809.12, 737.65]),
-    throughput_defensive=np.array([615.58, 598.64, 551.56]),
-    throughput_wb=np.array([229.50, 221.59, 250.94]),
-    throughput_trebi=np.array([199.01, 191.70, 186.15])
+    'throughput_small_payloads.png',
+    'Throughput Scaling (Small Payloads: 16-128 Bytes)',
+    y_min=150,
+    y_max=750,
+    y_step=100,
+    throughput_contract=np.array([576.40, 516.74, 493.63]),
+    throughput_defensive=np.array([415.25, 385.75, 402.64]),
+    throughput_obstack=np.array([396.85, 379.33, 311.31]),
+    throughput_trebi=np.array([365.55, 358.51, 360.20]),
+    throughput_wb=np.array([208.18, 204.88, 229.38]),
+    throughput_malloc=np.array([209.89, 214.63, 188.13])
 )
 
-# Generate the 1 MB capacity chart (32-bit metadata)
+# ==============================================================================================
+#  CHART 2: Throughput with Large Payloads (Heavy arrays, SIMD, DMA buffers)
+#  y_min is set to 0, step is set strictly to 75 for clean 10-interval vertical spacing
+# ==============================================================================================
 generate_throughput_chart(
-    'throughput_1mb_chart.png',
-    'Throughput Scaling (Buffer: 1MB, 32-bit Meta)',
-    throughput_contract=np.array([934.26, 817.52, 717.29]),
-    throughput_defensive=np.array([518.86, 555.27, 526.54]),
-    throughput_wb=np.array([231.14, 219.60, 251.32]),
-    throughput_trebi=np.array([198.87, 191.61, 186.08])
+    'throughput_large_payloads.png',
+    'Throughput Scaling (Large Payloads: 512-4096 Bytes)',
+    y_min=0,
+    y_max=750,
+    y_step=75,  # Changed from 50 to 75
+    throughput_contract=np.array([589.30, 506.21, 494.47]),
+    throughput_defensive=np.array([431.45, 393.71, 369.90]),
+    throughput_obstack=np.array([57.07, 58.45, 56.06]),
+    throughput_trebi=np.array([364.19, 360.50, 354.11]),
+    throughput_wb=np.array([70.66, 69.06, 67.70]),
+    throughput_malloc=np.array([43.13, 45.57, 42.78])
 )
 
 
-# ==========================================
-# CHART 2: Memory Efficiency (Usable Payload %)
-# ==========================================
+# ==============================================================================================
+#  CHART 3: Memory Efficiency (Dynamic meta-scaling vs traditional header)
+# ==============================================================================================
 alloc_sizes = np.array([8, 16, 32, 64, 128])
 buffer_size = 10240
 
@@ -184,7 +163,7 @@ ax.plot(alloc_sizes, es_effs[8], marker='o', markersize=4, linewidth=1.5, linest
 
 # Plot Competitor
 ax.plot(alloc_sizes, inline_efficiency, marker='s', markersize=6, linewidth=2.5,
-        color=COLOR_COMPETITOR, label='Traditional Allocator (16-byte Inline Header)')
+        color='#393e46', label='Traditional Allocator (16-byte Inline Header)')
 
 ax.set_xscale('log', base=2)
 ax.set_xticks(alloc_sizes)

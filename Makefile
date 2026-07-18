@@ -300,6 +300,7 @@ clean:
 	rm -f $(FUZZ_BINS) $(FUZZ_DEBUG_BINS)
 	rm -rf $(MATRIX_DIR)
 	rm -f $(BENCH_DIR)/benchmark_* # Clean all benchmark binaries
+	rm -f $(BENCH_DIR)/perf_benchmark
 
 
 # --- Fuzzing Targets ---
@@ -328,6 +329,31 @@ replay_%: $(FUZZ_DIR)/%_fuzzer_debug
 	@printf "\n--- Replaying crash file: $(CRASH) on $< ---\n"
 	@./$< $(CRASH)
 
+
+# ==========================================
+# Performance Profiling (Local Hardware Only)
+# ==========================================
+
+BENCH_PERF_BIN = $(BENCH_DIR)/perf_benchmark
+
+.PHONY: perf_stat perf_record
+
+# Build a lightweight, isolated benchmark just for profiling
+$(BENCH_PERF_BIN): $(BENCH_SRCS) easy_stack.h
+	@printf "Compiling quick profiling benchmark: $@\n"
+	@$(CXX) $(CXXFLAGS) -DBENCH_ONLY_EASYSTACK -DBENCH_QUICK $(BENCH_SRCS) -o $@
+
+# Run benchmark with hardware performance counters (cache misses, branch predictions, IPC)
+perf_stat: $(BENCH_PERF_BIN)
+	@printf "\n--- Running 'perf stat' on EasyStack (Quick Profile) ---\n"
+	perf stat -e cache-misses,cache-references,branches,branch-misses,instructions,cycles ./$(BENCH_PERF_BIN)
+
+# Record CPU profile for deep hotspot analysis (inspect with 'perf report')
+perf_record: $(BENCH_PERF_BIN)
+	@printf "\n--- Recording CPU Profile for EasyStack (Quick Profile) ---\n"
+	perf record -F 99 -g ./$(BENCH_PERF_BIN)
+	@printf "\nProfile saved. Run 'perf report' to analyze hotspots.\n"
+
 # Show available tests
 list:
 	@printf "Available commands:\n"
@@ -338,6 +364,8 @@ list:
 	@printf "  make coverage                 - build & run tests to generate coverage data for CodeCov\n"
 	@printf "  make fuzz_[name]              - run the 'core' fuzzer for 5 minutes (auto-detects fuzz_*.c)\n"
 	@printf "  make replay_[name] CRASH=...  - replay a specific crash file with ASCII visualization\n"
+	@printf "  make perf_stat                - run benchmarks under 'perf stat' to measure cache/branch misses\n"
+	@printf "  make perf_record              - record CPU profile to find hotspots (run 'perf report' afterwards)\n"
 	@printf "\nAvailable individual tests (always with debug output):\n"
 	@for test in $(TEST_SRCS) ; do \
 		basename=$$(basename $${test%.c} _test); \
