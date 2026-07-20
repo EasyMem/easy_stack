@@ -58,7 +58,7 @@
 
 #define ESTACK_VERSION_MAJOR 1
 #define ESTACK_VERSION_MINOR 2
-#define ESTACK_VERSION_PATCH 0
+#define ESTACK_VERSION_PATCH 2
 
 #define ESTACK_VERSION (ESTACK_VERSION_MAJOR * 10000 + ESTACK_VERSION_MINOR * 100 + ESTACK_VERSION_PATCH)
 
@@ -87,8 +87,8 @@
  *    #define ESTACK_POISON_BYTE 0xDD  // Custom byte pattern for freed memory
  *
  *  ALIGNMENT & OPTIMIZATION:
- *    #define ESTACK_NO_AUTO_ALIGN                  // Disable user payload alignment (saves MCU RAM)
- *    #define ESTACK_NO_ALIGN_HEADER                // Disable EStack header alignment (saves MCU RAM)
+ *    #define ESTACK_NO_AUTO_ALIGN                  // Disable user payload alignment (saves MCU RAM)        WILL CRASH ON SYSTEMS WITH STRICT ALIGNMENT REQUIREMENTS.
+ *    #define ESTACK_NO_ALIGN_HEADER                // Disable EStack header alignment (saves MCU RAM)       WILL CRASH ON SYSTEMS WITH STRICT ALIGNMENT REQUIREMENTS.
  *    #define ESTACK_DEFAULT_HEADER_ALIGNMENT <val> // Override optimal header alignment (defaults to 64/32/word bytes)
  *
  *  SYSTEM & LINKAGE:
@@ -101,6 +101,7 @@
  *  TUNING:
  *    #define ESTACK_MAGIC             <value>  // Custom magic number for stack validation
  *    #define ESTACK_MIN_BUFFER_SIZE   <value>  // Override minimum usable payload capacity
+ *    #define ESTACK_MIN_ALIGNMENT     <value>  // Override minimum payload alignment (must be power of two)
  * ============================================================================
 */
 
@@ -401,6 +402,7 @@ ESTACK_STATIC_ASSERT((ESTACK_POISON_BYTE >= 0x00) && (ESTACK_POISON_BYTE <= 0xFF
 #   endif
 #endif
 ESTACK_STATIC_ASSERT((ESTACK_MAGIC != 0), "ESTACK_MAGIC must be a non-zero value to ensure effective validation.");
+ESTACK_STATIC_ASSERT(ESTACK_MAGIC <= UINTPTR_MAX, "ESTACK_MAGIC exceeds the maximum value representable by uintptr_t");
 
 /*
  * Configuration: Minimum Alignment Limit
@@ -412,8 +414,11 @@ ESTACK_STATIC_ASSERT((ESTACK_MAGIC != 0), "ESTACK_MAGIC must be a non-zero value
 #ifdef ESTACK_NO_AUTO_ALIGN
 #   define ESTACK_MIN_ALIGNMENT ((size_t)1)
 #else
-#   define ESTACK_MIN_ALIGNMENT ((size_t)sizeof(uintptr_t))
+#   ifndef ESTACK_MIN_ALIGNMENT
+#       define ESTACK_MIN_ALIGNMENT ((size_t)sizeof(uintptr_t))
+#   endif
 #endif
+ESTACK_STATIC_ASSERT((ESTACK_MIN_ALIGNMENT & (ESTACK_MIN_ALIGNMENT - 1)) == 0, "ESTACK_MIN_ALIGNMENT must be a power of two");
 
 /*
  * Configuration: Header Alignment Selection
@@ -446,6 +451,8 @@ ESTACK_STATIC_ASSERT((ESTACK_MAGIC != 0), "ESTACK_MAGIC must be a non-zero value
 #           define ESTACK_DEFAULT_HEADER_ALIGNMENT ((size_t)sizeof(uintptr_t)) // Fallback to word alignment
 #       endif
 #   endif
+    ESTACK_STATIC_ASSERT((ESTACK_DEFAULT_HEADER_ALIGNMENT & (ESTACK_DEFAULT_HEADER_ALIGNMENT - 1)) == 0, "ESTACK_DEFAULT_HEADER_ALIGNMENT must be a power of two");
+    ESTACK_STATIC_ASSERT(ESTACK_DEFAULT_HEADER_ALIGNMENT >= sizeof(uintptr_t), "ESTACK_DEFAULT_HEADER_ALIGNMENT must be greater than or equal to sizeof(uintptr_t)");
 #endif
 
 /*
@@ -568,7 +575,7 @@ typedef struct {
 /*
  * Diagnostic & Visualization API
  */
-ESTACKDEF void estack_print(const EStack *stack);
+ESTACKDEF void estack_print(EStack *stack);
 #endif // DEBUG
 
 // --- Stack Creation (Dynamic) ---
@@ -1397,6 +1404,10 @@ ESTACKDEF void estack_free_to_marker(EStack *ESTACK_RESTRICT stack, EStackMarker
     ESTACK_CHECK_V((decoded_index <= cur_index), 
                "Internal Error: 'estack_free_to_marker' marker index is out of range");
 
+    if (ESTACK_UNLIKELY(decoded_index > cur_index)) {
+        return;
+    }
+
     if (decoded_index == cur_index) return;
 
     #ifdef ESTACK_POISONING
@@ -1624,7 +1635,7 @@ static int estack_compare_sizes(const void *a, const void *b) {
  * Print detailed diagnostic statistics of the EStack allocator.
  * Analyzes the metadata offset array on the fly to compute size metrics.
  */
-ESTACKDEF void estack_print(const EStack *stack) {
+ESTACKDEF void estack_print(EStack *stack) {
     if (!stack) {
         PRINTF(T("EStack: NULL pointer provided.\n\n"));
         return;
