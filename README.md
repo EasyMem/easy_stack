@@ -477,6 +477,7 @@ Helps detect use-after-free and uninitialized memory usage.
 | `ESTACK_NO_AUTO_ALIGN` | *None* | Completely disables user payload alignment (forces 1-byte boundary). Highly recommended for 8/16-bit MCUs to save memory. |
 | `ESTACK_NO_ALIGN_HEADER` | *None* | Completely disables context header alignment (forces 1-byte boundary). Automatically enabled on 8/16-bit systems to eliminate padding waste. |
 | `ESTACK_DEFAULT_HEADER_ALIGNMENT` | *Auto* | Override the optimal context header alignment boundary (defaults to 64-byte for 64-bit, 32-byte for 32-bit platforms to prevent L1 cache line splits). |
+| `ESTACK_MIN_ALIGNMENT` | *Auto* | Override the minimum user payload alignment boundary (defaults to 8-byte for 64-bit, 4-byte for 32-bit platforms). |
 | `ESTACK_NO_BRANCH_HINTS` | *None* | Completely disables compiler branch prediction hints (`ESTACK_LIKELY` and `ESTACK_UNLIKELY`). |
 | `ESTACK_MAGIC` | `0xDEADBEEF..` | Magic number used for Stack Marker XOR integrity masking. |
 
