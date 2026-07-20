@@ -1405,7 +1405,9 @@ ESTACKDEF void estack_free_to_marker(EStack *ESTACK_RESTRICT stack, EStackMarker
                "Internal Error: 'estack_free_to_marker' marker index is out of range");
 
     if (ESTACK_UNLIKELY(decoded_index > cur_index)) {
+        // LCOV_EXCL_START
         return;
+        // LCOV_EXCL_STOP
     }
 
     if (decoded_index == cur_index) return;
