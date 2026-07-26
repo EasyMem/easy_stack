@@ -71,18 +71,45 @@ FUZZ_DEBUG_BINS = $(FUZZ_SRCS:%.c=%_debug)
 FUZZ_FLAGS = -fsanitize=fuzzer,address,undefined -O3 -g3 -fno-omit-frame-pointer
 FUZZ_DEBUG_FLAGS = -fsanitize=fuzzer,address,undefined -O0 -g3 -fno-omit-frame-pointer -DESTACK_FUZZ_DEBUG -DDEBUG
 
-# --- Benchmark Configuration ---
+# --- Benchmark Configuration & Dynamic Vendor Discovery ---
 DEPTH ?= 15
 BENCH_DIR = bench
-BENCH_SRCS = $(BENCH_DIR)/benchmark.cpp $(BENCH_DIR)/Allocator.cpp $(BENCH_DIR)/StackAllocator.cpp
-BENCH_BIN = $(BENCH_DIR)/benchmark_$(DEPTH)
+BENCH_VENDOR_DIR = $(BENCH_DIR)/vendor
+
+BENCH_VENDOR_INCLUDES :=
+BENCH_VENDOR_SRCS     :=
+
+ifneq ($(wildcard $(BENCH_VENDOR_DIR)/wb_alloc),)
+    BENCH_VENDOR_INCLUDES += -I$(BENCH_VENDOR_DIR)/wb_alloc
+endif
+
+ifneq ($(wildcard $(BENCH_VENDOR_DIR)/memory-allocators),)
+    BENCH_VENDOR_INCLUDES += -I$(BENCH_VENDOR_DIR)/memory-allocators/includes \
+                             -I$(BENCH_VENDOR_DIR)/memory-allocators/src
+    BENCH_VENDOR_SRCS     += $(BENCH_VENDOR_DIR)/memory-allocators/src/Allocator.cpp \
+                             $(BENCH_VENDOR_DIR)/memory-allocators/src/StackAllocator.cpp
+endif
+
+ifneq ($(wildcard $(BENCH_VENDOR_DIR)/foonathan_memory),)
+    BENCH_VENDOR_INCLUDES += -I$(BENCH_VENDOR_DIR)/foonathan_memory/include \
+                             -I$(BENCH_VENDOR_DIR)/foonathan_memory/include/foonathan/memory \
+                             -I$(BENCH_VENDOR_DIR)/foonathan_memory/build/src \
+                             -I$(BENCH_VENDOR_DIR)/foonathan_memory/build/src/container_node_sizes \
+                             -I$(BENCH_VENDOR_DIR)/foonathan_memory/src
+    BENCH_VENDOR_SRCS     += $(wildcard $(BENCH_VENDOR_DIR)/foonathan_memory/src/*.cpp) \
+                             $(wildcard $(BENCH_VENDOR_DIR)/foonathan_memory/src/detail/*.cpp)
+endif
+
+BENCH_SRCS = $(BENCH_DIR)/benchmark.cpp $(BENCH_VENDOR_SRCS)
+BENCH_BIN  = $(BENCH_DIR)/benchmark_$(DEPTH)
+
 CXX ?= g++
-CXXFLAGS = -O3 -std=c++17 -flto -DNDEBUG -Wno-stringop-overflow -DBENCH_DEPTH=$(DEPTH) -I. -I$(BENCH_DIR)
+CXXFLAGS = -O3 -std=c++17 -flto -DNDEBUG -Wno-stringop-overflow -DBENCH_DEPTH=$(DEPTH) -I. -I$(BENCH_DIR) $(BENCH_VENDOR_INCLUDES)
 
 # Define the primary source file to check coverage for.
 COVERAGE_SRC = easy_stack.h
 
-.PHONY: all clean run tests tests_full list coverage build_coverage bench
+.PHONY: all clean run tests tests_full list coverage build_coverage bench bench_deps clean_vendor
 
 # Default goal: show available commands
 .DEFAULT_GOAL := list
@@ -280,12 +307,34 @@ clean_matrix:
 	rm -rf $(MATRIX_DIR)
 
 
-# --- Benchmark Target ---
+# --- Benchmark Dependencies & Target ---
+.PHONY: bench_deps clean_vendor bench
+
+bench_deps:
+	@mkdir -p $(BENCH_VENDOR_DIR)
+	@if [ ! -d "$(BENCH_VENDOR_DIR)/wb_alloc" ]; then \
+		printf "Fetching wb_alloc...\n"; \
+		git clone --depth 1 https://github.com/WilliamBundy/wb_alloc.git $(BENCH_VENDOR_DIR)/wb_alloc; \
+	fi
+	@if [ ! -d "$(BENCH_VENDOR_DIR)/memory-allocators" ]; then \
+		printf "Fetching Trebi memory-allocators...\n"; \
+		git clone --depth 1 https://github.com/mtrebi/memory-allocators.git $(BENCH_VENDOR_DIR)/memory-allocators; \
+	fi
+	@if [ ! -d "$(BENCH_VENDOR_DIR)/foonathan_memory" ]; then \
+		printf "Fetching foonathan/memory...\n"; \
+		git clone --depth 1 https://github.com/foonathan/memory.git $(BENCH_VENDOR_DIR)/foonathan_memory; \
+		(cd $(BENCH_VENDOR_DIR)/foonathan_memory && cmake -B build -DCMAKE_BUILD_TYPE=Release -DFOONATHAN_MEMORY_BUILD_TESTS=OFF -DFOONATHAN_MEMORY_BUILD_TOOLS=OFF && cmake --build build); \
+	fi
+
+clean_vendor:
+	rm -rf $(BENCH_VENDOR_DIR)
+
 $(BENCH_BIN): $(BENCH_SRCS) easy_stack.h
 	@printf "Compiling benchmark suite (depth $(DEPTH)): $@\n"
 	@$(CXX) $(CXXFLAGS) $(BENCH_SRCS) -o $@
 
-bench: $(BENCH_BIN)
+bench: bench_deps
+	@$(MAKE) --no-print-directory $(BENCH_BIN)
 	@printf "\n--- Running Stack Allocator Benchmarks (Depth: $(DEPTH)) ---\n"
 	@./$(BENCH_BIN)
 
@@ -361,6 +410,7 @@ list:
 	@printf "  make tests_full               - run all tests with debug output\n"
 	@printf "  make test_matrix -j$(nproc)   - run matrix of tests\n"
 	@printf "  make bench [DEPTH=15|30|100]  - compile and run benchmarks with customizable stack depth (default: 15)\n"
+	@printf "  make clean_vendor             - remove downloaded benchmark vendor libraries\n"
 	@printf "  make coverage                 - build & run tests to generate coverage data for CodeCov\n"
 	@printf "  make fuzz_[name]              - run the 'core' fuzzer for 5 minutes (auto-detects fuzz_*.c)\n"
 	@printf "  make replay_[name] CRASH=...  - replay a specific crash file with ASCII visualization\n"

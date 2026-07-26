@@ -72,3 +72,4 @@ benchmark_*
 wasi*
 perf.data
 bench/perf*
+bench/vendor

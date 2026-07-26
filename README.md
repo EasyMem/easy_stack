@@ -143,10 +143,10 @@ To evaluate execution speed, cache resilience, and scalability under different w
 ### Tested Allocators:
 1. **EasyStack (Contract)**: Trusted mode with validations delegated to assertions (compiled out in release).
 2. **EasyStack (Defensive)**: Default safety mode with full runtime bounds and API sanitization active.
-3. **Trebi LIFO**: A highly-optimized C++ template-based LIFO stack allocator.
-4. **GNU Obstack**: The glibc standard stack allocator (highly optimized C system baseline).
-5. **wb_alloc (Bundy)**: A popular fixed-size C arena/stack allocator.
-6. **std::stack + malloc**: The default standard library heap-allocated baseline.
+3. **GNU Obstack**: The glibc standard stack allocator (highly optimized C system baseline).
+4. **foonathan::memory**: A popular, highly-optimized C++ memory stack allocator (`foonathan::memory::memory_stack`).
+5. **Trebi LIFO**: A lightweight C++ template-based LIFO stack allocator.
+6. **wb_alloc (Bundy)**: A popular fixed-size C arena/stack allocator.
 
 ---
 
@@ -170,22 +170,22 @@ To prevent compile-time folding, dead-code elimination (DCE), or loop hoisting b
 #### RAW Results (Best of 25 runs, 2,000,000 iterations/run)
 | Allocator | Depth 15 (M ops/s) | Depth 30 (M ops/s) | Depth 100 (M ops/s) |
 | :--- | :---: | :---: | :---: |
-| **EasyStack (Contract)** | **576.40** | **516.74** | **493.63** |
-| **EasyStack (Defensive)** | **415.25** | **385.75** | **402.64** |
-| GNU Obstack | 396.85 | 379.33 | 311.31 |
-| Trebi LIFO (C++) | 365.55 | 358.51 | 360.20 |
-| std::stack + malloc | 209.89 | 214.63 | 188.13 |
-| wb_alloc (Bundy) | 208.18 | 204.88 | 229.38 |
+| **EasyStack (Contract)** | **553.95** | **520.37** | **497.31** |
+| **EasyStack (Defensive)** | 438.24 | 425.04 | 393.81 |
+| GNU Obstack | 492.32 | 472.35 | 354.83 |
+| foonathan::memory | 418.05 | 385.99 | 406.24 |
+| Trebi LIFO (C++) | 402.27 | 399.90 | 397.59 |
+| wb_alloc (Bundy) | 225.39 | 228.38 | 250.47 |
 
 #### PURE Algorithmic Results (Harness Overhead Subtracted)
 | Allocator | Depth 15 (M ops/s) | Depth 30 (M ops/s) | Depth 100 (M ops/s) |
 | :--- | :---: | :---: | :---: |
-| **EasyStack (Contract)** | **2747.82** | **2408.14** | **4972.83** |
-| **EasyStack (Defensive)** | **1076.10** | **941.91** | **1566.77** |
-| GNU Obstack | 870.41 | 895.82 | 720.72 |
-| Trebi LIFO (C++) | 732.81 | 787.78 | 1050.94 |
-| std::stack + malloc | 294.69 | 318.55 | 286.47 |
-| wb_alloc (Bundy) | 291.33 | 297.53 | 394.49 |
+| **EasyStack (Contract)** | **3733.89** | **2159.87** | **4987.23** |
+| **EasyStack (Defensive)** | 1157.74 | 1231.18 | 1354.20 |
+| GNU Obstack | 1631.08 | 1734.35 | 982.89 |
+| foonathan::memory | 1026.76 | 952.16 | 1513.53 |
+| Trebi LIFO (C++) | 936.54 | 1041.50 | 1400.02 |
+| wb_alloc (Bundy) | 331.27 | 352.33 | 456.30 |
 
 ---
 
@@ -199,22 +199,22 @@ To prevent compile-time folding, dead-code elimination (DCE), or loop hoisting b
 #### RAW Results (Best of 25 runs, 2,000,000 iterations/run)
 | Allocator | Depth 15 (M ops/s) | Depth 30 (M ops/s) | Depth 100 (M ops/s) |
 | :--- | :---: | :---: | :---: |
-| **EasyStack (Contract)** | **589.30** | **506.21** | **494.47** |
-| **EasyStack (Defensive)** | **431.45** | **393.71** | **369.90** |
-| Trebi LIFO (C++) | 364.19 | 360.50 | 354.11 |
-| wb_alloc (Bundy) | 70.66 | 69.06 | 67.70 |
-| GNU Obstack | 57.07 | 58.45 | 56.06 |
-| std::stack + malloc | 43.13 | 45.57 | 42.78 |
+| **EasyStack (Contract)** | **586.84** | **509.05** | **498.43** |
+| **EasyStack (Defensive)** | 441.73 | 395.46 | 427.61 |
+| foonathan::memory | 428.22 | 380.73 | 402.30 |
+| Trebi LIFO (C++) | 403.17 | 402.90 | 397.68 |
+| wb_alloc (Bundy) | 73.77 | 72.36 | 72.36 |
+| GNU Obstack | 61.38 | 58.90 | 58.93 |
 
 #### PURE Algorithmic Results (Harness Overhead Subtracted)
 | Allocator | Depth 15 (M ops/s) | Depth 30 (M ops/s) | Depth 100 (M ops/s) |
 | :--- | :---: | :---: | :---: |
-| **EasyStack (Contract)** | **3834.49** | **2164.57** | **4460.48** |
-| **EasyStack (Defensive)** | **1215.93** | **1014.13** | **1141.30** |
-| Trebi LIFO (C++) | 763.55 | 793.38 | 974.88 |
-| wb_alloc (Bundy) | 78.64 | 77.12 | 77.09 |
-| GNU Obstack | 62.17 | 64.12 | 62.35 |
-| std::stack + malloc | 45.97 | 48.94 | 46.34 |
+| **EasyStack (Contract)** | **4679.83** | **2600.74** | **8062.39** |
+| **EasyStack (Defensive)** | 1354.20 | 1072.00 | 1872.09 |
+| foonathan::memory | 1183.62 | 1073.10 | 1467.77 |
+| Trebi LIFO (C++) | 1010.15 | 1128.54 | 1408.14 |
+| wb_alloc (Bundy) | 82.88 | 81.81 | 83.23 |
+| GNU Obstack | 67.56 | 65.01 | 65.95 |
 
 ---
 

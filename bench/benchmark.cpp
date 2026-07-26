@@ -6,9 +6,13 @@
 #include <vector>
 #include <algorithm>
 #include <cstring>
-#include <stack>
+#include <memory>
+#include <optional>
 
-// Platform check for GNU Obstacks (built-in for glibc/Linux)
+// ==============================================================================
+//  AUTONOMOUS VENDOR DETECTION (LIFO STACKS ONLY)
+// ==============================================================================
+
 #if defined(__linux__) || defined(__GNU__) || defined(__GLIBC__)
 #   define obstack_chunk_alloc std::malloc
 #   define obstack_chunk_free std::free
@@ -18,84 +22,103 @@
 #   define HAS_OBSTACK 0
 #endif
 
-// Define default depth if not passed via compiler options (e.g., -DBENCH_DEPTH=30)
-#ifndef BENCH_DEPTH
-    #define BENCH_DEPTH 15
+#if defined(__has_include)
+#   if __has_include("wb_alloc.h")
+#       define WB_ALLOC_IMPLEMENTATION
+#       define WB_ALLOC_FIXED_SIZE_ONLY  
+#       include "wb_alloc.h"
+#       define HAS_WB_ALLOC 1
+#   else
+#       define HAS_WB_ALLOC 0
+#   endif
+
+#   if __has_include("StackAllocator.h")
+#       include "StackAllocator.h"
+#       define HAS_TREBI 1
+#   else
+#       define HAS_TREBI 0
+#   endif
+
+#   if __has_include("foonathan/memory/memory_stack.hpp") && __has_include("foonathan/memory/static_allocator.hpp")
+#       include "foonathan/memory/memory_stack.hpp"
+#       include "foonathan/memory/static_allocator.hpp"
+#       define HAS_FOONATHAN 1
+#   else
+#       define HAS_FOONATHAN 0
+#   endif
+#else
+#   define HAS_WB_ALLOC  0
+#   define HAS_TREBI     0
+#   define HAS_FOONATHAN 0
 #endif
 
-// Compile-time scaling of benchmark execution limits
+
+// ==============================================================================
+//  BENCHMARK CONFIGURATION
+// ==============================================================================
+
+#ifndef BENCH_DEPTH
+#   define BENCH_DEPTH 15
+#endif
+
 constexpr int DEPTH_MAX = BENCH_DEPTH;
 constexpr int DEPTH_P1  = (DEPTH_MAX * 8) / 15;
 constexpr int DEPTH_P2  = (DEPTH_MAX * 5) / 15;
 constexpr double OPS_PER_ITERATION = 2.0 * (DEPTH_P1 - DEPTH_P2 + DEPTH_MAX);
 
-// Compiler barrier configuration to avoid optimization folds (call elimination)
 #if defined(__GNUC__) || defined(__clang__)
-    #define COMPILER_BARRIER() asm volatile("" : : : "memory")
-    #define NOINLINE __attribute__((noinline))
+#   define COMPILER_BARRIER() asm volatile("" : : : "memory")
+#   define NOINLINE __attribute__((noinline))
 #elif defined(_MSC_VER)
-    #include <intrin.h>
-    #define COMPILER_BARRIER() _ReadWriteBarrier()
-    #define NOINLINE __declspec(noinline)
+#   include <intrin.h>
+#   define COMPILER_BARRIER() _ReadWriteBarrier()
+#   define NOINLINE __declspec(noinline)
 #else
-    #define COMPILER_BARRIER()
-    #define NOINLINE
+#   define COMPILER_BARRIER()
+#   define NOINLINE
 #endif
 
-// Configure EasyStack directly
+// Configure EasyStack
 #define ESTACK_SAFETY_POLICY ESTACK_POLICY_CONTRACT
 #define EASY_STACK_IMPLEMENTATION
 #define ESTACK_STATIC
 #include "easy_stack.h"
 
-// Configure wb_alloc (Bundy)
-#ifndef BENCH_ONLY_EASYSTACK
-#define WB_ALLOC_IMPLEMENTATION
-#define WB_ALLOC_FIXED_SIZE_ONLY  
-#include "wb_alloc.h"
-
-// Configure Trebi StackAllocator (C++)
-#include "StackAllocator.h"
-#endif
-
-// Benchmark configuration (Supports quick mode for pure profiling to avoid thermal throttling)
 #ifdef BENCH_QUICK
-    #define ROUNDS 25                     
-    #define ITERATIONS_PER_ROUND 2000000  
+#   define ROUNDS 25                     
+#   define ITERATIONS_PER_ROUND 2000000  
 #else
-    #define ROUNDS 25                    // Increased to 25 to filter out OS scheduler noise
-    #define ITERATIONS_PER_ROUND 2000000 // 2M iterations per round (50M operations total per run)
+#   define ROUNDS 25                    
+#   define ITERATIONS_PER_ROUND 2000000 
 #endif
 
-// Configure allocation sizes (Standard vs Large Payloads to blow past L1/L2 caches)
 #ifdef BENCH_LARGE_PAYLOADS
-    #define PHASE1_BASE 512
-    #define PHASE1_MOD  1024
-    #define PHASE3_BASE 1024
-    #define PHASE3_MOD  4096
+#   define PHASE1_BASE 512
+#   define PHASE1_MOD  1024
+#   define PHASE3_BASE 1024
+#   define PHASE3_MOD  4096
 #else
-    #define PHASE1_BASE 16
-    #define PHASE1_MOD  64
-    #define PHASE3_BASE 32
-    #define PHASE3_MOD  128
+#   define PHASE1_BASE 16
+#   define PHASE1_MOD  64
+#   define PHASE3_BASE 32
+#   define PHASE3_MOD  128
 #endif
 
-#define STACK_SIZE (1024 * 1024) // 1 MiB stack size for all allocators
+#define STACK_SIZE (1024 * 1024) // 1 MiB capacity
 #define RAND_POOL_SIZE 4096
 
-// Global volatile sink to enforce a strict data dependency chain
 volatile uint8_t g_checksum_sink = 0;
 
-// Dummy stack state representation to prevent optimizer from dead-folding the calibration test
 struct DummyStack {
     uintptr_t state;
 };
 
-// ==============================================================================================
-//  NOINLINE WRAPPERS (Forces realistic function boundaries and prevents register folding)
-// ==============================================================================================
 
-// 0. Calibration Dummy Wrapper (Now modifies a stateful dummy stack to prevent compiler bypass)
+// ==============================================================================
+//  NOINLINE WRAPPERS
+// ==============================================================================
+
+// 0. Calibration Dummy Wrapper
 NOINLINE void* dummy_call_wrapper(DummyStack* dstack, void* ptr, size_t sz) {
     dstack->state ^= sz;
     COMPILER_BARRIER();
@@ -111,7 +134,7 @@ NOINLINE void easystack_free_wrapper(EStack* stack, void* ptr) {
     estack_free(stack, ptr);
 }
 
-#ifndef BENCH_ONLY_EASYSTACK
+#if HAS_WB_ALLOC
 // 2. wb_alloc Wrappers
 NOINLINE void* wb_alloc_wrapper(wb_MemoryArena* arena, size_t sz) {
     return wb_arenaPush(arena, sz);
@@ -120,38 +143,21 @@ NOINLINE void* wb_alloc_wrapper(wb_MemoryArena* arena, size_t sz) {
 NOINLINE void wb_free_wrapper(wb_MemoryArena* arena) {
     wb_arenaPop(arena);
 }
+#endif
 
+#if HAS_TREBI
 // 3. Trebi StackAllocator Wrappers
 NOINLINE void* trebi_alloc_wrapper(StackAllocator& allocator, size_t sz) {
-    return allocator.Allocate(sz, 8); // Uses default 8-byte word alignment
+    return allocator.Allocate(sz, 8);
 }
 
 NOINLINE void trebi_free_wrapper(StackAllocator& allocator, void* ptr) {
     allocator.Free(ptr);
 }
+#endif
 
-// 4. std::stack + malloc Wrapper
-struct StdStack {
-    std::stack<void*> s;
-};
-
-NOINLINE void* stdstack_alloc_wrapper(StdStack& ss, size_t sz) {
-    void* ptr = std::malloc(sz);
-    if (ptr) {
-        ss.s.push(ptr);
-    }
-    return ptr;
-}
-
-NOINLINE void stdstack_free_wrapper(StdStack& ss, void* ptr) {
-    if (!ss.s.empty() && ss.s.top() == ptr) {
-        std::free(ptr);
-        ss.s.pop();
-    }
-}
-
-// 5. GNU Obstack Wrappers
 #if HAS_OBSTACK
+// 4. GNU Obstack Wrappers
 NOINLINE void* obstack_alloc_wrapper(struct obstack* ob, size_t sz) {
     return obstack_alloc(ob, sz);
 }
@@ -161,36 +167,46 @@ NOINLINE void obstack_free_wrapper(struct obstack* ob, void* ptr) {
 }
 #endif
 
-#endif // BENCH_ONLY_EASYSTACK
+#if HAS_FOONATHAN
+// 5. foonathan::memory::memory_stack (Static Allocator) Wrappers
+typedef foonathan::memory::memory_stack<foonathan::memory::static_allocator> FooStaticStack;
+
+NOINLINE void* foonathan_alloc_wrapper(FooStaticStack& stack, size_t sz, std::optional<FooStaticStack::marker>& out_marker) {
+    out_marker = stack.top();
+    return stack.allocate(sz, 8);
+}
+
+NOINLINE void foonathan_free_wrapper(FooStaticStack& stack, const std::optional<FooStaticStack::marker>& marker) {
+    if (marker) {
+        stack.unwind(*marker);
+    }
+}
+#endif
 
 
-// Helper to find the minimum duration in a run
 double get_min_time(const std::vector<double>& times) {
     return *std::min_element(times.begin(), times.end());
 }
 
+
+// ==============================================================================
+//  MAIN BENCHMARK SUITE
+// ==============================================================================
+
 int main() {
     void* backing_easy = std::malloc(STACK_SIZE);
-    void* backing_wb = nullptr;
-    
-#ifndef BENCH_ONLY_EASYSTACK
-    backing_wb = std::malloc(STACK_SIZE);
-#endif
+    void* backing_wb   = std::malloc(STACK_SIZE);
 
-    if (!backing_easy || (!backing_wb && !backing_easy)) {
+    if (!backing_easy || !backing_wb) {
         std::free(backing_easy);
         std::free(backing_wb);
         std::fprintf(stderr, "Failed to allocate backing memory\n");
         return 1;
     }
 
-    // Force OS page allocation to avoid page faults during the timed runs
     std::memset(backing_easy, 0, STACK_SIZE);
-#ifndef BENCH_ONLY_EASYSTACK
     std::memset(backing_wb, 0, STACK_SIZE);
-#endif
 
-    // Pre-generate a pool of pseudo-random numbers to avoid LCG overhead in the hot loop
     uint32_t rand_pool[RAND_POOL_SIZE];
     {
         uint32_t seed = 1337;
@@ -202,6 +218,7 @@ int main() {
 
     // --- Warm up phase for all allocators ---
     {
+        // 1. EasyStack Warmup
         EStack* temp_easy = estack_create_static(backing_easy, STACK_SIZE);
         for (int i = 0; i < 50000; i++) {
             void* p1 = easystack_alloc_wrapper(temp_easy, 32);
@@ -215,7 +232,8 @@ int main() {
         }
         estack_destroy(temp_easy);
 
-#ifndef BENCH_ONLY_EASYSTACK
+#if HAS_WB_ALLOC
+        // 2. wb_alloc Warmup
         wb_MemoryArena temp_wb;
         wb_arenaFixedSizeInit(&temp_wb, backing_wb, STACK_SIZE, wb_Arena_Stack);
         for (int i = 0; i < 50000; i++) {
@@ -228,7 +246,10 @@ int main() {
             wb_free_wrapper(&temp_wb);
             wb_free_wrapper(&temp_wb);
         }
+#endif
 
+#if HAS_TREBI
+        // 3. Trebi Warmup
         StackAllocator temp_trebi(STACK_SIZE);
         temp_trebi.Init();
         for (int i = 0; i < 50000; i++) {
@@ -241,20 +262,10 @@ int main() {
             trebi_free_wrapper(temp_trebi, p2);
             trebi_free_wrapper(temp_trebi, p1);
         }
-
-        StdStack temp_std;
-        for (int i = 0; i < 50000; i++) {
-            void* p1 = stdstack_alloc_wrapper(temp_std, 32);
-            void* p2 = stdstack_alloc_wrapper(temp_std, 64);
-            COMPILER_BARRIER();
-            if (p1) *(volatile char*)p1 = (char)i;
-            if (p2) *(volatile char*)p2 = (char)i;
-            COMPILER_BARRIER();
-            stdstack_free_wrapper(temp_std, p2);
-            stdstack_free_wrapper(temp_std, p1);
-        }
+#endif
 
 #if HAS_OBSTACK
+        // 4. GNU Obstack Warmup
         struct obstack temp_ob;
         obstack_init(&temp_ob);
         for (int i = 0; i < 50000; i++) {
@@ -270,29 +281,53 @@ int main() {
         obstack_free(&temp_ob, nullptr);
 #endif
 
+#if HAS_FOONATHAN
+        // 5. foonathan::memory Warmup
+        auto temp_foo_storage_ptr = std::make_unique<foonathan::memory::static_allocator_storage<STACK_SIZE>>();
+        FooStaticStack temp_foo_stack(STACK_SIZE, *temp_foo_storage_ptr);
+        std::optional<FooStaticStack::marker> temp_m1, temp_m2;
+        for (int i = 0; i < 50000; i++) {
+            void* p1 = foonathan_alloc_wrapper(temp_foo_stack, 32, temp_m1);
+            void* p2 = foonathan_alloc_wrapper(temp_foo_stack, 64, temp_m2);
+            COMPILER_BARRIER();
+            if (p1) *(volatile char*)p1 = (char)i;
+            if (p2) *(volatile char*)p2 = (char)i;
+            COMPILER_BARRIER();
+            foonathan_free_wrapper(temp_foo_stack, temp_m2);
+            foonathan_free_wrapper(temp_foo_stack, temp_m1);
+        }
 #endif
     }
 
     std::vector<double> times_overhead(ROUNDS);
     std::vector<double> times_easy(ROUNDS);
-#ifndef BENCH_ONLY_EASYSTACK
+#if HAS_WB_ALLOC
     std::vector<double> times_wb(ROUNDS);
+#endif
+#if HAS_TREBI
     std::vector<double> times_trebi(ROUNDS);
-    std::vector<double> times_stdstack(ROUNDS);
+#endif
 #if HAS_OBSTACK
     std::vector<double> times_obstack(ROUNDS);
 #endif
+#if HAS_FOONATHAN
+    std::vector<double> times_foonathan(ROUNDS);
 #endif
 
     const int pattern_iterations = ITERATIONS_PER_ROUND;
 
-    // Calculate total progress steps to display an accurate progress bar
-    int total_steps = ROUNDS * 2; // Always includes Test 0 (Overhead) and Test 1 (EasyStack)
-#ifndef BENCH_ONLY_EASYSTACK
-    total_steps += ROUNDS * 3; // wb_alloc, Trebi, std::stack
-#if HAS_OBSTACK
-    total_steps += ROUNDS; // GNU Obstack
+    int total_steps = ROUNDS * 2; // Calibration + EasyStack
+#if HAS_WB_ALLOC
+    total_steps += ROUNDS;
 #endif
+#if HAS_TREBI
+    total_steps += ROUNDS;
+#endif
+#if HAS_OBSTACK
+    total_steps += ROUNDS;
+#endif
+#if HAS_FOONATHAN
+    total_steps += ROUNDS;
 #endif
 
     int current_step = 0;
@@ -307,22 +342,20 @@ int main() {
         // --- TEST 0: Overhead Calibration ---
         report_progress("Calibration", round);
         {
-            DummyStack dstack = { 1337 }; // Stateful dummy stack initialization
+            DummyStack dstack = { 1337 };
             uint32_t r_idx = 0;
             void* ptrs[DEPTH_MAX] = { nullptr };
             void* dummy_dest = backing_easy;
 
             auto start = std::chrono::high_resolution_clock::now();
             for (int i = 0; i < pattern_iterations; i++) {
-                // Phase 1: Call dummy (Depth 0 -> DEPTH_P1)
                 for (int j = 0; j < DEPTH_P1; j++) {
                     size_t sz = PHASE1_BASE + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] & (PHASE1_MOD - 1));
                     ptrs[j] = dummy_call_wrapper(&dstack, dummy_dest, sz);
                     *(volatile char*)ptrs[j] = (char)((uintptr_t)ptrs[j] ^ i ^ j);
                 }
-                COMPILER_BARRIER(); // Preserve execution boundaries between test phases
+                COMPILER_BARRIER();
 
-                // Phase 2: Call dummy (Depth DEPTH_P1 -> DEPTH_P2)
                 uint8_t local_sum = 0;
                 for (int j = DEPTH_P1 - 1; j >= DEPTH_P2; j--) {
                     local_sum ^= *(volatile char*)ptrs[j];
@@ -332,7 +365,6 @@ int main() {
                 g_checksum_sink ^= local_sum;
                 COMPILER_BARRIER();
 
-                // Phase 3: Call dummy (Depth DEPTH_P2 -> DEPTH_MAX)
                 for (int j = DEPTH_P2; j < DEPTH_MAX; j++) {
                     size_t sz = PHASE3_BASE + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] & (PHASE3_MOD - 1));
                     ptrs[j] = dummy_call_wrapper(&dstack, dummy_dest, sz);
@@ -340,7 +372,6 @@ int main() {
                 }
                 COMPILER_BARRIER();
 
-                // Phase 4: Call dummy (Depth DEPTH_MAX -> 0)
                 local_sum = 0;
                 for (int j = DEPTH_MAX - 1; j >= 0; j--) {
                     local_sum ^= *(volatile char*)ptrs[j];
@@ -352,8 +383,6 @@ int main() {
             }
             auto end = std::chrono::high_resolution_clock::now();
             times_overhead[round] = std::chrono::duration<double>(end - start).count();
-            
-            // Merge the final dummy stack state into the sink to guarantee call validity
             g_checksum_sink ^= (uint8_t)dstack.state;
         }
 
@@ -366,19 +395,13 @@ int main() {
 
             auto start = std::chrono::high_resolution_clock::now();
             for (int i = 0; i < pattern_iterations; i++) {
-                // Phase 1: Allocate blocks (Depth 0 -> DEPTH_P1)
                 for (int j = 0; j < DEPTH_P1; j++) {
                     size_t sz = PHASE1_BASE + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] & (PHASE1_MOD - 1));
                     ptrs[j] = easystack_alloc_wrapper(stack, sz);
-                    if (!ptrs[j]) {
-                        std::fprintf(stderr, "EasyStack: allocation failed at round %d, iter %d\n", round, i);
-                        std::abort();
-                    }
                     *(volatile char*)ptrs[j] = (char)((uintptr_t)ptrs[j] ^ i ^ j);
                 }
                 COMPILER_BARRIER();
 
-                // Phase 2: Pop last blocks (Depth DEPTH_P1 -> DEPTH_P2)
                 uint8_t local_sum = 0;
                 for (int j = DEPTH_P1 - 1; j >= DEPTH_P2; j--) {
                     local_sum ^= *(volatile char*)ptrs[j];
@@ -388,19 +411,13 @@ int main() {
                 g_checksum_sink ^= local_sum;
                 COMPILER_BARRIER();
 
-                // Phase 3: Allocate more blocks (Depth DEPTH_P2 -> DEPTH_MAX)
                 for (int j = DEPTH_P2; j < DEPTH_MAX; j++) {
                     size_t sz = PHASE3_BASE + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] & (PHASE3_MOD - 1));
                     ptrs[j] = easystack_alloc_wrapper(stack, sz);
-                    if (!ptrs[j]) {
-                        std::fprintf(stderr, "EasyStack: allocation failed at round %d, iter %d\n", round, i);
-                        std::abort();
-                    }
                     *(volatile char*)ptrs[j] = (char)((uintptr_t)ptrs[j] ^ i ^ j);
                 }
                 COMPILER_BARRIER();
 
-                // Phase 4: Free all remaining blocks (Depth DEPTH_MAX -> 0)
                 local_sum = 0;
                 for (int j = DEPTH_MAX - 1; j >= 0; j--) {
                     local_sum ^= *(volatile char*)ptrs[j];
@@ -415,7 +432,7 @@ int main() {
             estack_destroy(stack);
         }
 
-#ifndef BENCH_ONLY_EASYSTACK
+#if HAS_WB_ALLOC
         // --- TEST 2: wb_alloc (Bundy) ---
         report_progress("wb_alloc (Bundy)", round);
         {
@@ -426,19 +443,13 @@ int main() {
 
             auto start = std::chrono::high_resolution_clock::now();
             for (int i = 0; i < pattern_iterations; i++) {
-                // Phase 1: Allocate blocks (Depth 0 -> DEPTH_P1)
                 for (int j = 0; j < DEPTH_P1; j++) {
                     size_t sz = PHASE1_BASE + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] & (PHASE1_MOD - 1));
                     ptrs[j] = wb_alloc_wrapper(&wb_stack, sz);
-                    if (!ptrs[j]) {
-                        std::fprintf(stderr, "wb_alloc: allocation failed at round %d, iter %d\n", round, i);
-                        std::abort();
-                    }
                     *(volatile char*)ptrs[j] = (char)((uintptr_t)ptrs[j] ^ i ^ j);
                 }
                 COMPILER_BARRIER();
 
-                // Phase 2: Pop last blocks (Depth DEPTH_P1 -> DEPTH_P2)
                 uint8_t local_sum = 0;
                 for (int j = DEPTH_P1 - 1; j >= DEPTH_P2; j--) {
                     local_sum ^= *(volatile char*)ptrs[j];
@@ -448,19 +459,13 @@ int main() {
                 g_checksum_sink ^= local_sum;
                 COMPILER_BARRIER();
 
-                // Phase 3: Allocate more blocks (Depth DEPTH_P2 -> DEPTH_MAX)
                 for (int j = DEPTH_P2; j < DEPTH_MAX; j++) {
                     size_t sz = PHASE3_BASE + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] & (PHASE3_MOD - 1));
                     ptrs[j] = wb_alloc_wrapper(&wb_stack, sz);
-                    if (!ptrs[j]) {
-                        std::fprintf(stderr, "wb_alloc: allocation failed at round %d, iter %d\n", round, i);
-                        std::abort();
-                    }
                     *(volatile char*)ptrs[j] = (char)((uintptr_t)ptrs[j] ^ i ^ j);
                 }
                 COMPILER_BARRIER();
 
-                // Phase 4: Free all remaining blocks (Depth DEPTH_MAX -> 0)
                 local_sum = 0;
                 for (int j = DEPTH_MAX - 1; j >= 0; j--) {
                     local_sum ^= *(volatile char*)ptrs[j];
@@ -473,7 +478,9 @@ int main() {
             auto end = std::chrono::high_resolution_clock::now();
             times_wb[round] = std::chrono::duration<double>(end - start).count();
         }
+#endif
 
+#if HAS_TREBI
         // --- TEST 3: Trebi StackAllocator (C++) ---
         report_progress("Trebi StackAlloc", round);
         {
@@ -484,19 +491,13 @@ int main() {
 
             auto start = std::chrono::high_resolution_clock::now();
             for (int i = 0; i < pattern_iterations; i++) {
-                // Phase 1: Allocate blocks (Depth 0 -> DEPTH_P1)
                 for (int j = 0; j < DEPTH_P1; j++) {
                     size_t sz = PHASE1_BASE + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] & (PHASE1_MOD - 1));
                     ptrs[j] = trebi_alloc_wrapper(trebi_stack, sz);
-                    if (!ptrs[j]) {
-                        std::fprintf(stderr, "Trebi: allocation failed at round %d, iter %d\n", round, i);
-                        std::abort();
-                    }
                     *(volatile char*)ptrs[j] = (char)((uintptr_t)ptrs[j] ^ i ^ j);
                 }
                 COMPILER_BARRIER();
 
-                // Phase 2: Pop last blocks (Depth DEPTH_P1 -> DEPTH_P2)
                 uint8_t local_sum = 0;
                 for (int j = DEPTH_P1 - 1; j >= DEPTH_P2; j--) {
                     local_sum ^= *(volatile char*)ptrs[j];
@@ -506,19 +507,13 @@ int main() {
                 g_checksum_sink ^= local_sum;
                 COMPILER_BARRIER();
 
-                // Phase 3: Allocate more blocks (Depth DEPTH_P2 -> DEPTH_MAX)
                 for (int j = DEPTH_P2; j < DEPTH_MAX; j++) {
                     size_t sz = PHASE3_BASE + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] & (PHASE3_MOD - 1));
                     ptrs[j] = trebi_alloc_wrapper(trebi_stack, sz);
-                    if (!ptrs[j]) {
-                        std::fprintf(stderr, "Trebi: allocation failed at round %d, iter %d\n", round, i);
-                        std::abort();
-                    }
                     *(volatile char*)ptrs[j] = (char)((uintptr_t)ptrs[j] ^ i ^ j);
                 }
                 COMPILER_BARRIER();
 
-                // Phase 4: Free all remaining blocks (Depth DEPTH_MAX -> 0)
                 local_sum = 0;
                 for (int j = DEPTH_MAX - 1; j >= 0; j--) {
                     local_sum ^= *(volatile char*)ptrs[j];
@@ -531,66 +526,10 @@ int main() {
             auto end = std::chrono::high_resolution_clock::now();
             times_trebi[round] = std::chrono::duration<double>(end - start).count();
         }
-
-        // --- TEST 4: std::stack + malloc ---
-        report_progress("std::stack+malloc", round);
-        {
-            StdStack std_stack;
-            uint32_t r_idx = 0;
-            void* ptrs[DEPTH_MAX] = { nullptr };
-
-            auto start = std::chrono::high_resolution_clock::now();
-            for (int i = 0; i < pattern_iterations; i++) {
-                // Phase 1: Allocate blocks (Depth 0 -> DEPTH_P1)
-                for (int j = 0; j < DEPTH_P1; j++) {
-                    size_t sz = PHASE1_BASE + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] & (PHASE1_MOD - 1));
-                    ptrs[j] = stdstack_alloc_wrapper(std_stack, sz);
-                    if (!ptrs[j]) {
-                        std::fprintf(stderr, "std::stack: allocation failed at round %d, iter %d\n", round, i);
-                        std::abort();
-                    }
-                    *(volatile char*)ptrs[j] = (char)((uintptr_t)ptrs[j] ^ i ^ j);
-                }
-                COMPILER_BARRIER();
-
-                // Phase 2: Pop last blocks (Depth DEPTH_P1 -> DEPTH_P2)
-                uint8_t local_sum = 0;
-                for (int j = DEPTH_P1 - 1; j >= DEPTH_P2; j--) {
-                    local_sum ^= *(volatile char*)ptrs[j];
-                    stdstack_free_wrapper(std_stack, ptrs[j]);
-                    ptrs[j] = nullptr;
-                }
-                g_checksum_sink ^= local_sum;
-                COMPILER_BARRIER();
-
-                // Phase 3: Allocate more blocks (Depth DEPTH_P2 -> DEPTH_MAX)
-                for (int j = DEPTH_P2; j < DEPTH_MAX; j++) {
-                    size_t sz = PHASE3_BASE + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] & (PHASE3_MOD - 1));
-                    ptrs[j] = stdstack_alloc_wrapper(std_stack, sz);
-                    if (!ptrs[j]) {
-                        std::fprintf(stderr, "std::stack: allocation failed at round %d, iter %d\n", round, i);
-                        std::abort();
-                    }
-                    *(volatile char*)ptrs[j] = (char)((uintptr_t)ptrs[j] ^ i ^ j);
-                }
-                COMPILER_BARRIER();
-
-                // Phase 4: Free all remaining blocks (Depth DEPTH_MAX -> 0)
-                local_sum = 0;
-                for (int j = DEPTH_MAX - 1; j >= 0; j--) {
-                    local_sum ^= *(volatile char*)ptrs[j];
-                    stdstack_free_wrapper(std_stack, ptrs[j]);
-                    ptrs[j] = nullptr;
-                }
-                g_checksum_sink ^= local_sum;
-                COMPILER_BARRIER();
-            }
-            auto end = std::chrono::high_resolution_clock::now();
-            times_stdstack[round] = std::chrono::duration<double>(end - start).count();
-        }
+#endif
 
 #if HAS_OBSTACK
-        // --- TEST 5: GNU Obstack ---
+        // --- TEST 4: GNU Obstack ---
         report_progress("GNU Obstack", round);
         {
             struct obstack ob;
@@ -600,19 +539,13 @@ int main() {
 
             auto start = std::chrono::high_resolution_clock::now();
             for (int i = 0; i < pattern_iterations; i++) {
-                // Phase 1: Allocate blocks (Depth 0 -> DEPTH_P1)
                 for (int j = 0; j < DEPTH_P1; j++) {
                     size_t sz = PHASE1_BASE + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] & (PHASE1_MOD - 1));
                     ptrs[j] = obstack_alloc_wrapper(&ob, sz);
-                    if (!ptrs[j]) {
-                        std::fprintf(stderr, "obstack: allocation failed at round %d, iter %d\n", round, i);
-                        std::abort();
-                    }
                     *(volatile char*)ptrs[j] = (char)((uintptr_t)ptrs[j] ^ i ^ j);
                 }
                 COMPILER_BARRIER();
 
-                // Phase 2: Pop last blocks (Depth DEPTH_P1 -> DEPTH_P2)
                 uint8_t local_sum = 0;
                 for (int j = DEPTH_P1 - 1; j >= DEPTH_P2; j--) {
                     local_sum ^= *(volatile char*)ptrs[j];
@@ -622,19 +555,13 @@ int main() {
                 g_checksum_sink ^= local_sum;
                 COMPILER_BARRIER();
 
-                // Phase 3: Allocate more blocks (Depth DEPTH_P2 -> DEPTH_MAX)
                 for (int j = DEPTH_P2; j < DEPTH_MAX; j++) {
                     size_t sz = PHASE3_BASE + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] & (PHASE3_MOD - 1));
                     ptrs[j] = obstack_alloc_wrapper(&ob, sz);
-                    if (!ptrs[j]) {
-                        std::fprintf(stderr, "obstack: allocation failed at round %d, iter %d\n", round, i);
-                        std::abort();
-                    }
                     *(volatile char*)ptrs[j] = (char)((uintptr_t)ptrs[j] ^ i ^ j);
                 }
                 COMPILER_BARRIER();
 
-                // Phase 4: Free all remaining blocks (Depth DEPTH_MAX -> 0)
                 local_sum = 0;
                 for (int j = DEPTH_MAX - 1; j >= 0; j--) {
                     local_sum ^= *(volatile char*)ptrs[j];
@@ -646,135 +573,128 @@ int main() {
             }
             auto end = std::chrono::high_resolution_clock::now();
             times_obstack[round] = std::chrono::duration<double>(end - start).count();
-            obstack_free(&ob, nullptr); // Free all obstack memory
+            obstack_free(&ob, nullptr);
         }
 #endif
 
-#endif // BENCH_ONLY_EASYSTACK
+#if HAS_FOONATHAN
+        // --- TEST 5: foonathan::memory::memory_stack (Pure Static) ---
+        report_progress("foonathan::memory", round);
+        {
+            auto foo_storage_ptr = std::make_unique<foonathan::memory::static_allocator_storage<STACK_SIZE>>();
+            FooStaticStack foo_stack(STACK_SIZE, *foo_storage_ptr);
+
+            uint32_t r_idx = 0;
+            void* ptrs[DEPTH_MAX] = { nullptr };
+            std::optional<FooStaticStack::marker> markers[DEPTH_MAX];
+
+            auto start = std::chrono::high_resolution_clock::now();
+            for (int i = 0; i < pattern_iterations; i++) {
+                for (int j = 0; j < DEPTH_P1; j++) {
+                    size_t sz = PHASE1_BASE + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] & (PHASE1_MOD - 1));
+                    ptrs[j] = foonathan_alloc_wrapper(foo_stack, sz, markers[j]);
+                    *(volatile char*)ptrs[j] = (char)((uintptr_t)ptrs[j] ^ i ^ j);
+                }
+                COMPILER_BARRIER();
+
+                uint8_t local_sum = 0;
+                for (int j = DEPTH_P1 - 1; j >= DEPTH_P2; j--) {
+                    local_sum ^= *(volatile char*)ptrs[j];
+                    foonathan_free_wrapper(foo_stack, markers[j]);
+                    ptrs[j] = nullptr;
+                }
+                g_checksum_sink ^= local_sum;
+                COMPILER_BARRIER();
+
+                for (int j = DEPTH_P2; j < DEPTH_MAX; j++) {
+                    size_t sz = PHASE3_BASE + (rand_pool[r_idx++ & (RAND_POOL_SIZE - 1)] & (PHASE3_MOD - 1));
+                    ptrs[j] = foonathan_alloc_wrapper(foo_stack, sz, markers[j]);
+                    *(volatile char*)ptrs[j] = (char)((uintptr_t)ptrs[j] ^ i ^ j);
+                }
+                COMPILER_BARRIER();
+
+                local_sum = 0;
+                for (int j = DEPTH_MAX - 1; j >= 0; j--) {
+                    local_sum ^= *(volatile char*)ptrs[j];
+                    foonathan_free_wrapper(foo_stack, markers[j]);
+                    ptrs[j] = nullptr;
+                }
+                g_checksum_sink ^= local_sum;
+                COMPILER_BARRIER();
+            }
+            auto end = std::chrono::high_resolution_clock::now();
+            times_foonathan[round] = std::chrono::duration<double>(end - start).count();
+        }
+#endif
     }
 
-    // Clear progress indicator from stderr
     std::fprintf(stderr, "\r%-50s\r", "");
     std::fflush(stderr);
 
-    // Extracting the best run times to filter out system jitter
     double best_overhead = get_min_time(times_overhead);
     double best_easy     = get_min_time(times_easy);
-#ifndef BENCH_ONLY_EASYSTACK
-    double best_wb       = get_min_time(times_wb);
-    double best_trebi    = get_min_time(times_trebi);
-    double best_std      = get_min_time(times_stdstack);
-#if HAS_OBSTACK
-    double best_ob       = get_min_time(times_obstack);
-#endif
-#endif
 
-    // Subtract overhead to find pure algorithmic performance
-    double pure_easy  = best_easy - best_overhead;
-    if (pure_easy < 1e-9)  pure_easy = 1e-9; // Avoid division by zero
-    
-#ifndef BENCH_ONLY_EASYSTACK
-    double pure_wb    = best_wb - best_overhead;
-    double pure_trebi = best_trebi - best_overhead;
-    double pure_std   = best_std - best_overhead;
-    if (pure_wb < 1e-9)    pure_wb = 1e-9;
-    if (pure_trebi < 1e-9) pure_trebi = 1e-9;
-    if (pure_std < 1e-9)   pure_std = 1e-9;
-
-#if HAS_OBSTACK
-    double pure_ob    = best_ob - best_overhead;
-    if (pure_ob < 1e-9)    pure_ob = 1e-9;
-#endif
-#endif
-
-    // Calculation of allocator throughput dynamically scaled based on compiled depth
-    const double total_ops_per_round = (double)pattern_iterations * OPS_PER_ITERATION;
+    double pure_easy  = std::max(1e-9, best_easy - best_overhead);
+    const double total_ops = (double)pattern_iterations * OPS_PER_ITERATION;
 
     std::cout << "=== RAW Results (Best of " << ROUNDS << " runs, " << pattern_iterations << " iterations/run) ===\n";
     std::printf("System Overhead (Wrapper Calls): %.4f sec\n", best_overhead);
-    std::printf("EasyStack:         %.4f sec (%.2f million ops/sec)\n", 
-           best_easy, total_ops_per_round / best_easy / 1e6);
-#ifndef BENCH_ONLY_EASYSTACK
-    std::printf("wb_alloc (Bundy):  %.4f sec (%.2f million ops/sec)\n", 
-           best_wb, total_ops_per_round / best_wb / 1e6);
-    std::printf("Trebi LIFO (C++):  %.4f sec (%.2f million ops/sec)\n", 
-           best_trebi, total_ops_per_round / best_trebi / 1e6);
-    std::printf("std::stack+malloc: %.4f sec (%.2f million ops/sec)\n", 
-           best_std, total_ops_per_round / best_std / 1e6);
-#if HAS_OBSTACK
-    std::printf("GNU Obstack:       %.4f sec (%.2f million ops/sec)\n", 
-           best_ob, total_ops_per_round / best_ob / 1e6);
-#else
-    std::printf("GNU Obstack:       N/A (Not supported on this platform)\n");
-#endif
-#endif
+    std::printf("EasyStack:           %.4f sec (%.2f million ops/sec)\n", best_easy, total_ops / best_easy / 1e6);
 
-    std::cout << "\n=== RAW Performance Multipliers (Harness Overhead Included) ===\n";
-#ifndef BENCH_ONLY_EASYSTACK
-    std::printf("RAW EasyStack vs wb_alloc:          %.1f%%\n", 
-           ((best_wb / best_easy) - 1.0) * 100.0);
-    std::printf("RAW EasyStack vs Trebi:             %.1f%%\n", 
-           ((best_trebi / best_easy) - 1.0) * 100.0);
-    std::printf("RAW EasyStack vs std::stack+malloc: %.1f%%\n", 
-           ((best_std / best_easy) - 1.0) * 100.0);
-#if HAS_OBSTACK
-    std::printf("RAW EasyStack vs GNU Obstack:       %.1f%%\n", 
-           ((best_ob / best_easy) - 1.0) * 100.0);
+#if HAS_WB_ALLOC
+    double best_wb = get_min_time(times_wb);
+    std::printf("wb_alloc (Bundy):    %.4f sec (%.2f million ops/sec)\n", best_wb, total_ops / best_wb / 1e6);
 #endif
+#if HAS_TREBI
+    double best_trebi = get_min_time(times_trebi);
+    std::printf("Trebi LIFO (C++):    %.4f sec (%.2f million ops/sec)\n", best_trebi, total_ops / best_trebi / 1e6);
+#endif
+#if HAS_OBSTACK
+    double best_ob = get_min_time(times_obstack);
+    std::printf("GNU Obstack:         %.4f sec (%.2f million ops/sec)\n", best_ob, total_ops / best_ob / 1e6);
+#endif
+#if HAS_FOONATHAN
+    double best_foo = get_min_time(times_foonathan);
+    std::printf("foonathan::memory:   %.4f sec (%.2f million ops/sec)\n", best_foo, total_ops / best_foo / 1e6);
 #endif
 
     std::cout << "\n=== PURE Algorithmic Results (Wrapper Overhead Subtracted) ===\n";
-    std::printf("EasyStack (Pure):  %.4f sec (%.2f million ops/sec)\n", 
-           pure_easy, total_ops_per_round / pure_easy / 1e6);
-           
-#ifndef BENCH_ONLY_EASYSTACK
-    std::printf("wb_alloc (Pure):   %.4f sec (%.2f million ops/sec)\n", 
-           pure_wb, total_ops_per_round / pure_wb / 1e6);
+    std::printf("EasyStack (Pure):    %.4f sec (%.2f million ops/sec)\n", pure_easy, total_ops / pure_easy / 1e6);
 
-    std::printf("Trebi LIFO (Pure): %.4f sec (%.2f million ops/sec)\n", 
-           pure_trebi, total_ops_per_round / pure_trebi / 1e6);
-
-    std::printf("std::stack (Pure): %.4f sec (%.2f million ops/sec)\n", 
-           pure_std, total_ops_per_round / pure_std / 1e6);
-
-#if HAS_OBSTACK
-    std::printf("Obstack (Pure):    %.4f sec (%.2f million ops/sec)\n", 
-           pure_ob, total_ops_per_round / pure_ob / 1e6);
+#if HAS_WB_ALLOC
+    double pure_wb = std::max(1e-9, best_wb - best_overhead);
+    std::printf("wb_alloc (Pure):     %.4f sec (%.2f million ops/sec)\n", pure_wb, total_ops / pure_wb / 1e6);
 #endif
-    
+#if HAS_TREBI
+    double pure_trebi = std::max(1e-9, best_trebi - best_overhead);
+    std::printf("Trebi LIFO (Pure):   %.4f sec (%.2f million ops/sec)\n", pure_trebi, total_ops / pure_trebi / 1e6);
+#endif
+#if HAS_OBSTACK
+    double pure_ob = std::max(1e-9, best_ob - best_overhead);
+    std::printf("Obstack (Pure):      %.4f sec (%.2f million ops/sec)\n", pure_ob, total_ops / pure_ob / 1e6);
+#endif
+#if HAS_FOONATHAN
+    double pure_foo = std::max(1e-9, best_foo - best_overhead);
+    std::printf("foonathan (Pure):    %.4f sec (%.2f million ops/sec)\n", pure_foo, total_ops / pure_foo / 1e6);
+#endif
+
     std::printf("-----------------------------------------\n");
-    std::printf("PURE EasyStack vs wb_alloc:          %.1f%%\n", 
-           ((pure_wb / pure_easy) - 1.0) * 100.0);
-    std::printf("PURE EasyStack vs Trebi:             %.1f%%\n", 
-           ((pure_trebi / pure_easy) - 1.0) * 100.0);
-    std::printf("PURE EasyStack vs std::stack+malloc: %.1f%%\n", 
-           ((pure_std / pure_easy) - 1.0) * 100.0);
+#if HAS_WB_ALLOC
+    std::printf("PURE EasyStack vs wb_alloc:          %.1f%%\n", ((pure_wb / pure_easy) - 1.0) * 100.0);
+#endif
+#if HAS_TREBI
+    std::printf("PURE EasyStack vs Trebi:             %.1f%%\n", ((pure_trebi / pure_easy) - 1.0) * 100.0);
+#endif
 #if HAS_OBSTACK
-    std::printf("PURE EasyStack vs GNU Obstack:       %.1f%%\n", 
-           ((pure_ob / pure_easy) - 1.0) * 100.0);
+    std::printf("PURE EasyStack vs GNU Obstack:       %.1f%%\n", ((pure_ob / pure_easy) - 1.0) * 100.0);
 #endif
+#if HAS_FOONATHAN
+    std::printf("PURE EasyStack vs foonathan::memory: %.1f%%\n", ((pure_foo / pure_easy) - 1.0) * 100.0);
 #endif
-
-    std::cout << "\n=== Methodology & Metrics Explained ===\n"
-              << "1. System Overhead (Harness): Establishes the 'baseline' time required to execute\n"
-              << "   the testing structures. This includes loop iteration limits, random number pool\n"
-              << "   lookups, writing the dynamic payloads, and function call wrapper register spills.\n\n"
-              << "2. RAW Results: The total execution time including the System Overhead. Represents the\n"
-              << "   real-world performance as experienced by an application calling these routines.\n"
-              << "   Optimizations inside hot loops have been enabled by removing compiler barriers within\n"
-              << "   active phases, letting the CPU maximize speculative instruction pipelining.\n\n"
-              << "3. PURE Algorithmic Results: Extracted by subtracting 'System Overhead' from 'RAW' times.\n"
-              << "   This mathematical filter isolates the pure overhead of the allocator's logic\n"
-              << "   (pointer arithmetic, dynamic bit-width metadata scaling, alignment padding math,\n"
-              << "   and safety checks), showing the algorithmic efficiency limits.\n";
 
     std::free(backing_easy);
-#ifndef BENCH_ONLY_EASYSTACK
     std::free(backing_wb);
-#endif
 
-    // Print volatile checksum sink to prevent dead-code elimination of read/write chains
     std::printf("\nData dependency checksum sink: 0x%02X\n", (unsigned int)g_checksum_sink);
-
     return 0;
 }
